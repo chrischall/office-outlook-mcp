@@ -1,0 +1,16 @@
+{
+  "name": "office-outlook-mcp",
+  "displayName": "Outlook (Microsoft 365)",
+  "version": "0.0.0",
+  "description": "Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts and tasks, and send mail with confirmation, using your signed-in browser session",
+  "author": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "homepage": "https://github.com/chrischall/office-outlook-mcp",
+  "repository": "https://github.com/chrischall/office-outlook-mcp",
+  "license": "MIT",
+  "keywords": ["outlook", "office365", "microsoft365", "email", "calendar", "mcp"],
+  "skills": "./skills/",
+  "mcp": "./.mcp.json"
+}

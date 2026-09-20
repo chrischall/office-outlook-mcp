@@ -1,0 +1,79 @@
+version: 1
+name: Outlook (Microsoft 365)
+slug: outlook
+summary: >-
+  Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts
+  and tasks, and send mail with confirmation
+#
+# Hosting note (a comment, not user-facing summary text): this MCP mints its
+# credential through the fetchproxy BROWSER BRIDGE. It is not a full-bridge
+# server — every API request is a plain server-side fetch to
+# outlook.office.com — but the bearer token it needs can only come from a
+# signed-in Outlook tab, and tokens last only ~25h, so a hosted registration
+# that is expected to keep working needs the bridge.
+#
+# A bridged registration also needs runtime `fly-shared`, `bridge: true` and a
+# `bridgePortEnv`, which are REGISTRATION fields this manifest has no schema
+# for — set them over the control API (PUT on the registration id). The port
+# variable to name in `bridgePortEnv` is OUTLOOK_WS_PORT, declared below.
+# `state.dataDir` below is required for `bridge`.
+#
+# The alternative, for a short-lived or CI registration, is to supply
+# OUTLOOK_ACCESS_TOKEN as a principal secret and accept that it expires in
+# about a day.
+#
+# Credentials here are PER PERSON — this reads someone's work mailbox — so a
+# real deployment wants identity.perUserChild with OUTLOOK_ACCESS_TOKEN as an
+# auth field, never one operator's token shared via --secret-env.
+env:
+  - name: OUTLOOK_ACCESS_TOKEN
+    secret: true
+    required: false
+    help: >-
+      Pre-obtained Outlook bearer token. Overrides the browser bridge. Power
+      users / CI only; tokens last about 25 hours.
+  - name: OUTLOOK_DISABLE_FETCHPROXY
+    required: false
+    help: >-
+      Set to '1' to disable browser capture, requiring OUTLOOK_ACCESS_TOKEN.
+  - name: OUTLOOK_API_BASE
+    required: false
+    help: >-
+      Override the Outlook REST base URL. Defaults to
+      https://outlook.office.com/api/v2.0.
+  - name: OUTLOOK_WS_PORT
+    required: false
+    help: >-
+      fetchproxy concentrator port used for token capture. Defaults to 37149,
+      the fleet-wide shared port. Name this variable in the registration's
+      bridgePortEnv for a bridged deployment.
+  - name: OUTLOOK_CAPTURE_TIMEOUT
+    required: false
+    help: >-
+      Seconds to wait for the Outlook tab to make a request we can read a token
+      from. Defaults to 30.
+  - name: OUTLOOK_TOKEN_CACHE
+    required: false
+    help: >-
+      Set to 'false' to stop caching the captured token between runs. Defaults
+      to true.
+  - name: OUTLOOK_TOKEN_FILE
+    required: false
+    help: >-
+      Path to the cached token file. Defaults to
+      ~/.office-outlook-mcp/token.json.
+state:
+  dataDir: true
+  reason: >-
+    Caches the captured bearer token at ~/.office-outlook-mcp/token.json (0600)
+    and, for a bridged registration, holds the fetchproxy identity keypair
+    under ~/.fetchproxy/identity. Without persistence every cold start
+    re-captures from the browser — and on a scale-to-zero machine that means
+    re-prompting the user to approve pairing, constantly.
+egress:
+  # The ONLY host this server fetches. The bridge's declared domains
+  # (cloud.microsoft, office.com) are what the BROWSER reaches during token
+  # capture, not what this Node process requests, so they are deliberately not
+  # listed here.
+  allow:
+    - outlook.office.com

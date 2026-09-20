@@ -1,0 +1,27 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "office-outlook-mcp",
+  "owner": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "metadata": {
+    "description": "MCP server for Outlook / Microsoft 365 — mail, calendar, contacts and tasks via natural language",
+    "version": "0.0.0"
+  },
+  "plugins": [
+    {
+      "name": "office-outlook-mcp",
+      "displayName": "Outlook (Microsoft 365)",
+      "source": "./",
+      "description": "MCP server for Outlook / Microsoft 365 — read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
+      "version": "0.0.0",
+      "author": { "name": "Chris Hall" },
+      "homepage": "https://github.com/chrischall/office-outlook-mcp",
+      "repository": "https://github.com/chrischall/office-outlook-mcp",
+      "license": "MIT",
+      "keywords": ["outlook", "office365", "microsoft365", "email", "calendar", "mcp"],
+      "category": "productivity"
+    }
+  ]
+}

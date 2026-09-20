@@ -1,0 +1,63 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.chrischall/office-outlook-mcp",
+  "description": "Outlook / Microsoft 365 for Claude — mail, calendar, contacts and tasks, with confirm-gated sending",
+  "repository": {
+    "url": "https://github.com/chrischall/office-outlook-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@chrischall/office-outlook-mcp",
+      "version": "0.0.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "OUTLOOK_ACCESS_TOKEN",
+          "description": "Pre-obtained Outlook bearer token. Overrides the browser bridge. Power users / CI only; tokens last about 25 hours.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "OUTLOOK_DISABLE_FETCHPROXY",
+          "description": "Set to '1' to disable browser capture, requiring OUTLOOK_ACCESS_TOKEN.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "OUTLOOK_API_BASE",
+          "description": "Override the Outlook REST base URL. Defaults to https://outlook.office.com/api/v2.0.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "OUTLOOK_WS_PORT",
+          "description": "fetchproxy concentrator port used for token capture. Defaults to 37149, the fleet-wide shared port.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "OUTLOOK_CAPTURE_TIMEOUT",
+          "description": "Seconds to wait for the Outlook tab to make a request we can read a token from. Defaults to 30.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "OUTLOOK_TOKEN_CACHE",
+          "description": "Set to 'false' to stop caching the captured token between runs. Defaults to true.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "OUTLOOK_TOKEN_FILE",
+          "description": "Path to the cached token file. Defaults to ~/.office-outlook-mcp/token.json.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

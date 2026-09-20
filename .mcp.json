@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "outlook": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/bundle.js"],
+      "env": {
+        "OUTLOOK_ACCESS_TOKEN": "${OUTLOOK_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
