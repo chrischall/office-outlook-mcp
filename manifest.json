@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "office-outlook-mcp",
   "display_name": "Outlook (Microsoft 365)",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
   "author": {
     "name": "Chris Chall",
@@ -17,7 +17,13 @@
   "homepage": "https://github.com/chrischall/office-outlook-mcp",
   "support": "https://github.com/chrischall/office-outlook-mcp/issues",
   "license": "MIT",
-  "keywords": ["outlook", "office365", "microsoft365", "email", "calendar"],
+  "keywords": [
+    "outlook",
+    "office365",
+    "microsoft365",
+    "email",
+    "calendar"
+  ],
   "runtimes": {
     "node": ">=22.5"
   },
@@ -26,7 +32,9 @@
     "entry_point": "dist/bundle.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/bundle.js"],
+      "args": [
+        "${__dirname}/dist/bundle.js"
+      ],
       "env": {
         "OUTLOOK_ACCESS_TOKEN": "${user_config.outlook_access_token}"
       }
@@ -42,23 +50,77 @@
     }
   },
   "tools": [
-    { "name": "outlook_list_folders", "description": "List mail folders with unread and total counts" },
-    { "name": "outlook_list_messages", "description": "List messages in a folder, newest first" },
-    { "name": "outlook_get_message", "description": "Get one message including its body" },
-    { "name": "outlook_list_attachments", "description": "List a message's attachments" },
-    { "name": "outlook_list_events", "description": "List calendar events in a date window" },
-    { "name": "outlook_get_event", "description": "Get one calendar event with attendees" },
-    { "name": "outlook_list_calendars", "description": "List calendars in the mailbox" },
-    { "name": "outlook_get_profile", "description": "Get the signed-in mailbox identity" },
-    { "name": "outlook_get_mailbox_settings", "description": "Get time zone, working hours and auto-replies" },
-    { "name": "outlook_list_contacts", "description": "List saved contacts" },
-    { "name": "outlook_list_people", "description": "List people ranked by relevance" },
-    { "name": "outlook_list_tasks", "description": "List Outlook tasks" },
-    { "name": "outlook_send_mail", "description": "Send an email (requires confirm)" },
-    { "name": "outlook_create_draft", "description": "Create a draft without sending (requires confirm)" },
-    { "name": "outlook_mark_read", "description": "Mark a message read or unread (requires confirm)" },
-    { "name": "outlook_move_message", "description": "Move a message to another folder (requires confirm)" },
-    { "name": "outlook_create_event", "description": "Create a calendar event (requires confirm)" },
-    { "name": "outlook_healthcheck", "description": "Report credential state and probe the API" }
+    {
+      "name": "outlook_list_folders",
+      "description": "List mail folders with unread and total counts"
+    },
+    {
+      "name": "outlook_list_messages",
+      "description": "List messages in a folder, newest first"
+    },
+    {
+      "name": "outlook_get_message",
+      "description": "Get one message including its body"
+    },
+    {
+      "name": "outlook_list_attachments",
+      "description": "List a message's attachments"
+    },
+    {
+      "name": "outlook_list_events",
+      "description": "List calendar events in a date window"
+    },
+    {
+      "name": "outlook_get_event",
+      "description": "Get one calendar event with attendees"
+    },
+    {
+      "name": "outlook_list_calendars",
+      "description": "List calendars in the mailbox"
+    },
+    {
+      "name": "outlook_get_profile",
+      "description": "Get the signed-in mailbox identity"
+    },
+    {
+      "name": "outlook_get_mailbox_settings",
+      "description": "Get time zone, working hours and auto-replies"
+    },
+    {
+      "name": "outlook_list_contacts",
+      "description": "List saved contacts"
+    },
+    {
+      "name": "outlook_list_people",
+      "description": "List people ranked by relevance"
+    },
+    {
+      "name": "outlook_list_tasks",
+      "description": "List Outlook tasks"
+    },
+    {
+      "name": "outlook_send_mail",
+      "description": "Send an email (requires confirm)"
+    },
+    {
+      "name": "outlook_create_draft",
+      "description": "Create a draft without sending (requires confirm)"
+    },
+    {
+      "name": "outlook_mark_read",
+      "description": "Mark a message read or unread (requires confirm)"
+    },
+    {
+      "name": "outlook_move_message",
+      "description": "Move a message to another folder (requires confirm)"
+    },
+    {
+      "name": "outlook_create_event",
+      "description": "Create a calendar event (requires confirm)"
+    },
+    {
+      "name": "outlook_healthcheck",
+      "description": "Report credential state and probe the API"
+    }
   ]
 }
