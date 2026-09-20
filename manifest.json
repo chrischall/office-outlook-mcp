@@ -4,7 +4,7 @@
   "name": "office-outlook-mcp",
   "display_name": "Outlook (Microsoft 365)",
   "version": "0.1.0",
-  "description": "Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
+  "description": "Outlook / Microsoft 365 for Claude \u2014 read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
   "author": {
     "name": "Chris Chall",
     "email": "chris.c.hall@gmail.com",
@@ -24,9 +24,6 @@
     "email",
     "calendar"
   ],
-  "runtimes": {
-    "node": ">=22.5"
-  },
   "server": {
     "type": "node",
     "entry_point": "dist/bundle.js",
@@ -122,5 +119,15 @@
       "name": "outlook_healthcheck",
       "description": "Report credential state and probe the API"
     }
-  ]
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=22.5.0"
+    }
+  }
 }
