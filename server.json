@@ -6,13 +6,15 @@
     "url": "https://github.com/chrischall/office-outlook-mcp",
     "source": "github"
   },
-  "version": "0.0.0",
+  "version": "0.1.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@chrischall/office-outlook-mcp",
-      "version": "0.0.0",
-      "transport": { "type": "stdio" },
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
         {
           "name": "OUTLOOK_ACCESS_TOKEN",
