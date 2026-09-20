@@ -78,7 +78,27 @@ describe('publish scaffold', () => {
   });
 
   it('keeps the mcpb runtime floor on an LTS Node so LTS users can install', () => {
-    expect(read('manifest.json').runtimes.node).toBe('>=22.5');
+    // Nested under `compatibility` — there is NO top-level `runtimes` in the
+    // mcpb schema, and `mcpb pack` rejects the whole manifest for an
+    // unrecognised key. That failure lands in the PUBLISH job, after
+    // release-please has already tagged and cut the GitHub Release, and it
+    // runs BEFORE `npm publish` — so one stray key means the tag exists, the
+    // Release exists, and npm never moves.
+    expect(read('manifest.json').compatibility.runtimes.node).toBe('>=22.5.0');
+  });
+
+  it('carries no key the mcpb schema would reject', () => {
+    // A value-only assertion cannot see a key in the wrong PLACE, which is how
+    // the invalid manifest shipped green. This pins the shape instead.
+    const allowed = new Set([
+      '$schema', 'manifest_version', 'name', 'display_name', 'version',
+      'description', 'author', 'repository', 'homepage', 'support', 'license',
+      'keywords', 'server', 'user_config', 'tools', 'compatibility', 'icon',
+      'screenshots', 'long_description', 'documentation', 'privacy_policies',
+      'tools_generated', 'prompts', 'prompts_generated',
+    ]);
+    const unknown = Object.keys(read('manifest.json')).filter((k) => !allowed.has(k));
+    expect(unknown).toEqual([]);
   });
 });
 
