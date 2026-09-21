@@ -37,6 +37,42 @@ npm i -g @fetchproxy/cli
 The first capture prints a 6-digit pair code to approve in the Transporter
 popup; the grant persists.
 
+### Install in opencode
+
+opencode reads MCP servers from `opencode.json` (project) or
+`~/.config/opencode/opencode.json` (global):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "outlook": {
+        "type": "local",
+        "command": ["npx", "-y", "@chrischall/office-outlook-mcp"]
+      }
+    }
+  }
+}
+```
+
+That one file serves **opencode 2 and current opencode 1** — verified live on
+2.0.11, 1.18.31 and 1.18.28, which all connect from it.
+
+Two things worth knowing, both measured rather than assumed:
+
+- **Never carry both config shapes in one file.** Older opencode 1 wants the
+  servers directly under `mcp` (`"mcp": { "outlook": { … } }`), and the
+  temptation is to write both so either version finds one. Do not: given a
+  sibling key beside `servers`, opencode 2 parses the file — it still shows up
+  in `opencode debug config` — and then reports *"No MCP servers configured"*.
+  No error, no warning, every server silently gone.
+- **An opencode 1 old enough to reject `servers` says so loudly**
+  (`Configuration is invalid at …`), so if you see that, switch that machine to
+  the flat shape rather than combining them.
+
+opencode 2 talks to a background service, so `opencode reload` before
+`opencode mcp list` after editing config.
+
 ### Configuration
 
 Everything is optional — with nothing set, the server captures from the browser.
