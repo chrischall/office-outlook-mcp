@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.2...v0.1.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* **tools:** outlook_send_mail is destructive ([#7](https://github.com/chrischall/office-outlook-mcp/issues/7)) ([17e1df1](https://github.com/chrischall/office-outlook-mcp/commit/17e1df1ccbd1214687fa7bef80e53fdbb56cd2b6))
+
 ## [0.1.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.1...v0.1.2) (2026-09-21)
 
 
