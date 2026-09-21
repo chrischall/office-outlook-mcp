@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.3...v0.1.4) (2026-09-21)
+
+
+### Bug Fixes
+
+* allow outlook.cloud.microsoft in hosted egress and the fpx skill profile ([#9](https://github.com/chrischall/office-outlook-mcp/issues/9)) ([50c384b](https://github.com/chrischall/office-outlook-mcp/commit/50c384b24036c13b0793a86b032f8c1755c092ae))
+
 ## [0.1.3](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.2...v0.1.3) (2026-09-21)
 
 
