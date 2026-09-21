@@ -236,12 +236,41 @@ describe('write tools are confirm-gated', () => {
     ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00' }],
   ] as const;
 
-  it.each(writeTools)('%s makes no network call without confirm', async (name, args) => {
+  it('books a new event in the mailbox time zone, not UTC', async () => {
+    // Worse than the read-side default it mirrors: a caller who says "3pm"
+    // and gets `TimeZone: "UTC"` has booked 11am Eastern in someone's real
+    // calendar, and the dry-run preview says "(UTC)" while showing the 3pm
+    // they asked for. Wrong data written, not merely displayed.
+    const get = vi.fn(async (path: string) => {
+      if (path.includes('MailboxSettings')) return { TimeZone: 'Eastern Standard Time' };
+      return { value: [] };
+    });
+    const { client, calls } = stubClient({ get });
+    const h = await harnessFor(registerWriteTools, client);
+    const res = parseToolResult<{ action?: string; willSend?: { Start?: { TimeZone?: string } } }>(
+      await h.callTool('outlook_create_event', {
+        subject: 's',
+        start: '2026-09-22T15:00:00',
+        end: '2026-09-22T16:00:00',
+      }),
+    );
+    expect(res.willSend?.Start?.TimeZone).toBe('Eastern Standard Time');
+    expect(res.action).toContain('Eastern Standard Time');
+    // Still a dry run: the zone lookup is a GET, and nothing was written.
+    expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
+    await h.close();
+  });
+
+  it.each(writeTools)('%s writes nothing without confirm', async (name, args) => {
+    // The gate stops MUTATIONS. `outlook_create_event` first reads the mailbox
+    // time zone so the preview can state the zone it would book in — a
+    // read-only GET, and the difference between a preview worth reading and
+    // one that says 3pm while meaning 11am.
     const { client, calls } = stubClient();
     const h = await harnessFor(registerWriteTools, client);
     const res = parseToolResult<{ dryRun?: boolean }>(await h.callTool(name, { ...args }));
     expect(res.dryRun).toBe(true);
-    expect(calls).toHaveLength(0);
+    expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
     await h.close();
   });
 

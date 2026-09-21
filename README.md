@@ -66,8 +66,10 @@ Everything is optional — with nothing set, the server captures from the browse
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
-Mutating tools make **no network call** without `confirm: true` — they return a
-dry-run preview of exactly what would be sent.
+Mutating tools **write nothing** without `confirm: true` — they return a
+dry-run preview of exactly what would be sent. (`outlook_create_event` first
+reads the mailbox time zone, so its preview can name the zone it would book
+in; that is the one read a dry run makes.)
 
 ## Things worth knowing
 

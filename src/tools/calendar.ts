@@ -10,6 +10,7 @@ import {
   type OutlookEvent,
 } from '../view.js';
 import { VIEWS } from './mail.js';
+import { mailboxTimeZone } from '../timezone.js';
 
 const EVENT_SELECT =
   'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,BodyPreview';
@@ -21,39 +22,6 @@ function qs(params: Record<string, string | number | undefined>): string {
     parts.push(`${k}=${encodeURIComponent(String(v))}`);
   }
   return parts.length ? `?${parts.join('&')}` : '';
-}
-
-/**
- * The mailbox's own Windows time-zone name, or `undefined` if it cannot be read.
- *
- * Without it the calendar view answers in UTC, and a 7:15am Eastern meeting
- * comes back as 11:15 carrying nothing louder than `TimeZone: "UTC"` — read
- * past, that is a four-hour scheduling error. The mailbox already declares its
- * zone, so the default is knowable rather than guessable.
- *
- * Cached because it is a per-mailbox constant and paying a second round trip on
- * every listing to re-learn it is not worth it. Keyed by CLIENT rather than
- * held in a module variable: the zone belongs to the mailbox, not to the
- * process, so a module-global would hand one mailbox's zone to another client
- * in the same process — and would leak between tests in file order, which is
- * how a test that believes it exercised the failure path quietly stops doing so.
- *
- * A failure is swallowed deliberately — the zone is a nicety and must not take
- * the calendar down with it — and is NOT cached, so a transient blip does not
- * pin the mailbox to UTC for the life of the server.
- */
-const zoneByClient = new WeakMap<OutlookClient, string>();
-async function mailboxTimeZone(client: OutlookClient): Promise<string | undefined> {
-  const cached = zoneByClient.get(client);
-  if (cached) return cached;
-  try {
-    const settings = await client.get<{ TimeZone?: string }>('/me/MailboxSettings');
-    const zone = settings?.TimeZone?.trim() || undefined;
-    if (zone) zoneByClient.set(client, zone);
-    return zone;
-  } catch {
-    return undefined;
-  }
 }
 
 export function registerCalendarTools(server: McpServer, client: OutlookClient): void {
