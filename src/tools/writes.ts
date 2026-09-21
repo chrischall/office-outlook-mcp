@@ -31,7 +31,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     {
       description:
         'Send an email from the signed-in mailbox. Requires confirm:true — without it this makes no network call and returns a preview of exactly what would be sent.',
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: z.object({
         to: recipientList,
         cc: recipientList,
