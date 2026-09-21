@@ -48,6 +48,46 @@ describe('version sync', () => {
   });
 });
 
+describe('opencode install docs', () => {
+  const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  const mcpBlocks = [...readme.matchAll(/```jsonc?\n([\s\S]*?)```/g)]
+    .map((m) => m[1])
+    .filter((b) => b.includes('"mcp"'));
+
+  it('documents opencode at all', () => {
+    expect(readme).toMatch(/opencode/i);
+    expect(mcpBlocks.length).toBeGreaterThan(0);
+  });
+
+  it('leads with the nested `servers` shape, which serves opencode 2 AND current 1', () => {
+    // Measured 2026-09-20 against real binaries: opencode 2.0.11 reads
+    // `mcp.servers.<name>`; opencode 1.18.28 and 1.18.31 read it too. Only
+    // older 1.x rejects it, and does so LOUDLY ("Configuration is invalid"),
+    // which is the failure mode you want — the user is told to switch shapes.
+    const primary = mcpBlocks[0];
+    expect(primary).toContain('"servers"');
+    expect(primary).toContain('@chrischall/office-outlook-mcp');
+  });
+
+  it('never shows both shapes in one file — opencode 2 drops the lot in silence', () => {
+    // THE trap, and the reason this test exists. Given a `mcp` block carrying
+    // both a v1-style `mcp.<name>` entry and `mcp.servers`, opencode 2.0.11
+    // parses the document (it shows up in `debug config`) and then reports "No
+    // MCP servers configured" — no error, no warning, every server gone.
+    // Verified A/B in one directory against one service: remove the v1 sibling
+    // and the same file connects.
+    for (const block of mcpBlocks) {
+      if (!block.includes('"servers"')) continue;
+      const mcp = (JSON.parse(block) as { mcp: Record<string, unknown> }).mcp;
+      expect(Object.keys(mcp).filter((k) => k !== 'servers' && k !== 'timeout')).toEqual([]);
+    }
+  });
+
+  it('keeps every documented block valid JSON', () => {
+    for (const block of mcpBlocks) expect(() => JSON.parse(block)).not.toThrow();
+  });
+});
+
 describe('publish scaffold', () => {
   it('declares the repository url npm provenance validates against', () => {
     // Without this the publish 422s AFTER release-please has already tagged,
