@@ -71,9 +71,10 @@ state:
     re-captures from the browser — and on a scale-to-zero machine that means
     re-prompting the user to approve pairing, constantly.
 egress:
-  # The ONLY host this server fetches. The bridge's declared domains
-  # (cloud.microsoft, office.com) are what the BROWSER reaches during token
-  # capture, not what this Node process requests, so they are deliberately not
-  # listed here.
+  # outlook.office.com is the only host the API client fetches. The two
+  # Outlook Web hosts the token is captured from are allowed too, so a hosted
+  # registration is not blocked on either — outlook.cloud.microsoft is where a
+  # current tenant's tab lives.
   allow:
+    - outlook.cloud.microsoft
     - outlook.office.com
