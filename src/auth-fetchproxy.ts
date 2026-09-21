@@ -16,7 +16,7 @@
  *   - that token authenticates plain server-side requests to
  *     `outlook.office.com/api/v2.0` with no bridge involved;
  *   - older tenants still serve the app from `outlook.office.com`, so both
- *     hosts are declared and captured concurrently.
+ *     hosts are declared and captured, under ONE overall window.
  *
  * We do NOT try to mint a token by calling an endpoint ourselves. There is no
  * such endpoint reachable from the page's origin — the token comes from MSAL's
@@ -63,6 +63,29 @@ const CAPTURE_DECL_OFFICE = {
   path: '/*',
   headerName: 'authorization',
 } as const;
+
+/**
+ * The hosts a token may be captured from — the two Outlook Web origins.
+ *
+ * Exported so the trust boundary below can be derived from them rather than
+ * restated.
+ */
+export const CAPTURE_HOSTS = [CAPTURE_DECL_CLOUD.host, CAPTURE_DECL_OFFICE.host] as const;
+
+/**
+ * The extension's trust boundary: exactly the hosts we capture from.
+ *
+ * These were the apex domains `cloud.microsoft` and `office.com`, which the
+ * extension reads as "any subdomain of either" — the whole of Microsoft 365
+ * granted to read one header off two known hosts. It is also what sent the
+ * pairing flow to `m365.cloud.microsoft/chat`, a tab nothing here needs.
+ *
+ * Narrowing costs nothing: the capture declarations were always these two
+ * hosts, and every API call the server makes afterwards is a plain server-side
+ * `fetch` that the bridge never sees. Verified live 2026-09-20 — capture still
+ * succeeded, and an already-paired extension did not ask to re-pair.
+ */
+export const TRUST_DOMAINS = [...CAPTURE_HOSTS];
 
 /**
  * How long to wait for the page to make a request we can read.
@@ -171,14 +194,16 @@ export function stripBearer(raw: string): string {
 /**
  * Capture an Outlook access token from the user's signed-in browser tab.
  *
- * Both hosts are raced: whichever the tab is actually on answers first, and the
- * other simply never resolves. Returns the bare token (no `Bearer ` prefix).
+ * Both hosts are attempted: whichever the tab is actually on answers first, and
+ * the other simply never resolves. The bridge serializes them, so the pair is
+ * held to one deadline by `raceCaptures` rather than to one deadline each.
+ * Returns the bare token (no `Bearer ` prefix).
  */
 export async function captureTokenViaFetchproxy(): Promise<string> {
   const transport = createFetchproxyTransport({
     ...withFetch(
       createBootstrapOpts({
-        domains: ['cloud.microsoft', 'office.com'],
+        domains: [...TRUST_DOMAINS],
         bootstrap: {
           captureHeaders: [{ ...CAPTURE_DECL_CLOUD }, { ...CAPTURE_DECL_OFFICE }],
         },

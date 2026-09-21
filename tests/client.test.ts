@@ -201,6 +201,21 @@ describe('stripBearer', () => {
   });
 });
 
+describe('bridge trust boundary', () => {
+  it('trusts exactly the hosts it captures from, and no wider', async () => {
+    // Was the apex pair `cloud.microsoft` / `office.com`, which grants the
+    // extension every subdomain of both — the whole of Microsoft 365 — to read
+    // one header off two known hosts. It is also what sent the pairing flow to
+    // `m365.cloud.microsoft/chat`, a tab nothing here needs. Deriving the trust
+    // set from the capture declarations keeps the two from drifting apart.
+    const { CAPTURE_HOSTS, TRUST_DOMAINS } = await import('../src/auth-fetchproxy.js');
+    expect([...TRUST_DOMAINS].sort()).toEqual([...CAPTURE_HOSTS].sort());
+    for (const d of TRUST_DOMAINS) {
+      expect(d).toMatch(/^outlook\./);
+    }
+  });
+});
+
 describe('raceCaptures', () => {
   it('returns the first host that answers and ignores the other failing', async () => {
     const slowFail = new Promise<string>((_, rej) => setTimeout(() => rej(new Error('nope')), 50));
