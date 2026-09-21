@@ -13,8 +13,8 @@ token** (~25h lifetime) — every actual request is a plain server-side `curl`.
 
 ```sh
 npm i -g @fetchproxy/cli                      # provides `fpx`
-fpx profile add outlook --domain cloud.microsoft --domain office.com \
-                        --domain microsoft.com --domain office365.com
+fpx profile add outlook --domain outlook.cloud.microsoft \
+                        --domain outlook.office.com
 fpx profile declare outlook \
   --capture-header authorization@outlook.cloud.microsoft \
   --capture-header authorization@outlook.office.com \
