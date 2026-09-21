@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OutlookClient, DEFAULT_API_BASE } from '../src/client.js';
-import { stripBearer } from '../src/auth-fetchproxy.js';
+import { stripBearer, raceCaptures } from '../src/auth-fetchproxy.js';
 
 /** A JWT whose `exp` is `secondsFromNow` out. Signature is irrelevant here. */
 function jwt(secondsFromNow: number): string {
@@ -198,5 +198,39 @@ describe('stripBearer', () => {
     expect(stripBearer('Bearer abc')).toBe('abc');
     expect(stripBearer('bearer  abc ')).toBe('abc');
     expect(stripBearer('  abc  ')).toBe('abc');
+  });
+});
+
+describe('raceCaptures', () => {
+  it('returns the first host that answers and ignores the other failing', async () => {
+    const slowFail = new Promise<string>((_, rej) => setTimeout(() => rej(new Error('nope')), 50));
+    await expect(raceCaptures([Promise.resolve('tok'), slowFail], 1_000)).resolves.toBe('tok');
+  });
+
+  it('gives up ONE window after it started, not one window per declared host', async () => {
+    // Measured live 2026-09-20: the two declared hosts are documented as
+    // "raced", but the bridge serializes them, so the wait was ~2x the
+    // configured window — 5s produced 14.4s and 20s produced 36s. At the
+    // documented 30s default that is past 60s, which is the default request
+    // timeout in an MCP client: the capture blew the host's deadline before it
+    // could report its own error. The knob must bound the TOTAL wait.
+    vi.useFakeTimers();
+    try {
+      const never = () => new Promise<string>(() => {});
+      const p = raceCaptures([never(), never()], 20_000);
+      const assertion = expect(p).rejects.toThrow(/20s/);
+      await vi.advanceTimersByTimeAsync(20_100);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports what each host said when all of them fail', async () => {
+    const p = raceCaptures(
+      [Promise.reject(new Error('cloud said no')), Promise.reject(new Error('office said no'))],
+      1_000,
+    );
+    await expect(p).rejects.toThrow(/cloud said no.*office said no/s);
   });
 });

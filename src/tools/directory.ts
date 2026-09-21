@@ -60,7 +60,9 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
         `/me/contacts${qs({
           $top: limit ?? 50,
           $skip: skip,
-          $select: 'Id,DisplayName,EmailAddresses,CompanyName,JobTitle,MobilePhone',
+          // `MobilePhone1`, not `MobilePhone`: the latter is the Graph name and
+          // the v2.0 Contact type rejects it outright with a 400.
+          $select: 'Id,DisplayName,EmailAddresses,CompanyName,JobTitle,MobilePhone1',
         })}`,
       );
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));

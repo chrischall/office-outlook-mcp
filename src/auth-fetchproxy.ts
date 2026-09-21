@@ -109,6 +109,59 @@ function withFetch<T extends { capabilities?: readonly Capability[] }>(opts: T):
   };
 }
 
+/**
+ * Settle a set of per-host capture attempts under ONE overall deadline.
+ *
+ * `Promise.any` alone is not enough. The two declared hosts are documented as
+ * raced, but the bridge serializes them behind its single connection, so the
+ * wait was the sum rather than the max — measured live at 14.4s for a 5s window
+ * and 36s for a 20s one. At the 30s default that lands past the 60s request
+ * timeout an MCP client uses by default, so the host gave up before this code
+ * could report the real reason. The window is a promise about total wait, and
+ * this is what keeps it.
+ *
+ * Exported for the test that pins that bound.
+ */
+export async function raceCaptures(
+  attempts: readonly Promise<string>[],
+  windowMs: number,
+): Promise<string> {
+  // A rejection that loses the race must not surface as an unhandled rejection
+  // once the winner has already settled the caller.
+  for (const a of attempts) a.catch(() => {});
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `timed out after ${Math.round(windowMs / 1000)}s waiting for the page to ` +
+              'make a request we could read',
+          ),
+        ),
+      windowMs,
+    );
+  });
+
+  try {
+    // `any` resolves on the first SUCCESS rather than the first settle, so the
+    // host the user is not on failing does not sink the one they are on.
+    return await Promise.race([
+      Promise.any(attempts).catch((e: unknown) => {
+        throw new Error(
+          e instanceof AggregateError
+            ? e.errors.map((x) => (x as Error).message).join('; ')
+            : (e as Error).message,
+        );
+      }),
+      expiry,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Normalise a captured header to a bare token, dropping any `Bearer ` prefix. */
 export function stripBearer(raw: string): string {
   const m = /^\s*Bearer\s+(.+)$/i.exec(raw);
@@ -162,15 +215,10 @@ export async function captureTokenViaFetchproxy(): Promise<string> {
         }),
     );
 
-    // `any` resolves on the first SUCCESS rather than the first settle, so the
-    // host the user is not on failing does not sink the one they are on.
     try {
-      return await Promise.any(attempts);
+      return await raceCaptures(attempts, CAPTURE_TIMEOUT_MS);
     } catch (e) {
-      const detail =
-        e instanceof AggregateError
-          ? e.errors.map((x) => (x as Error).message).join('; ')
-          : (e as Error).message;
+      const detail = (e as Error).message;
       throw new Error(
         `could not capture an Outlook token from the browser (${detail}). ` +
           'Open a signed-in Outlook tab (outlook.cloud.microsoft or ' +

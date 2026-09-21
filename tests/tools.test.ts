@@ -96,6 +96,20 @@ describe('read tools', () => {
     await h.close();
   });
 
+  it('selects a phone property the v2.0 Contact type actually has', async () => {
+    // Live 2026-09-20: `MobilePhone` is a Graph name. The v2.0 Contact type
+    // calls it `MobilePhone1`, and the mismatch made every call 400 with
+    // "Could not find a property named 'MobilePhone'" — a tool that could
+    // never once have succeeded against a real mailbox.
+    const { client, calls } = stubClient();
+    const h = await harnessFor(registerDirectoryTools, client);
+    await h.callTool('outlook_list_contacts', {});
+    const select = decodeURIComponent(calls[0].path);
+    expect(select).toContain('MobilePhone1');
+    expect(select).not.toMatch(/MobilePhone(?!1)/);
+    await h.close();
+  });
+
   it('registers the expected read surface', async () => {
     const { client } = stubClient();
     const h = await harnessFor(registerDirectoryTools, client);
