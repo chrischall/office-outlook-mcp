@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
 import { previewUnlessConfirmed, schemaConfirm } from './_confirm.js';
+import { mailboxTimeZone } from '../timezone.js';
 
 const recipientList = z
   .array(z.string().min(3))
@@ -194,7 +195,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         timeZone: z
           .string()
           .optional()
-          .describe('Windows time-zone name (default "UTC")'),
+          .describe('Windows time-zone name. Defaults to the MAILBOX time zone.'),
         location: z.string().optional().describe('Location display name'),
         body: z.string().optional().describe('Event description'),
         attendees: recipientList,
@@ -202,7 +203,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       }),
     },
     async ({ subject, start, end, timeZone, location, body, attendees, confirm }) => {
-      const tz = timeZone ?? 'UTC';
+      // Falls back to UTC only when the mailbox itself declares no zone.
+      const tz = timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
       const payload = {
         Subject: subject,
         Start: { DateTime: start, TimeZone: tz },

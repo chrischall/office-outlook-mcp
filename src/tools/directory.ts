@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, viewParam } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
+import { stripOData } from '../view.js';
 import { VIEWS } from './mail.js';
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -18,7 +19,7 @@ function collection(
   raw: boolean,
 ): Record<string, unknown> {
   if (raw) return data as Record<string, unknown>;
-  return { count: data.value?.length ?? 0, items: data.value ?? [] };
+  return { count: data.value?.length ?? 0, items: (data.value ?? []).map(stripOData) };
 }
 
 export function registerDirectoryTools(server: McpServer, client: OutlookClient): void {
@@ -30,7 +31,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       annotations: { readOnlyHint: true },
       inputSchema: z.object({}),
     },
-    async () => minifiedResult(await client.get('/me')),
+    async () => minifiedResult(stripOData(await client.get<Record<string, unknown>>('/me'))),
   );
 
   server.registerTool(
@@ -41,7 +42,8 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       annotations: { readOnlyHint: true },
       inputSchema: z.object({}),
     },
-    async () => minifiedResult(await client.get('/me/MailboxSettings')),
+    async () =>
+      minifiedResult(stripOData(await client.get<Record<string, unknown>>('/me/MailboxSettings'))),
   );
 
   server.registerTool(
@@ -60,7 +62,9 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
         `/me/contacts${qs({
           $top: limit ?? 50,
           $skip: skip,
-          $select: 'Id,DisplayName,EmailAddresses,CompanyName,JobTitle,MobilePhone',
+          // `MobilePhone1`, not `MobilePhone`: the latter is the Graph name and
+          // the v2.0 Contact type rejects it outright with a 400.
+          $select: 'Id,DisplayName,EmailAddresses,CompanyName,JobTitle,MobilePhone1',
         })}`,
       );
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));

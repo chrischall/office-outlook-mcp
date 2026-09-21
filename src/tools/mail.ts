@@ -7,6 +7,7 @@ import {
   compactMessage,
   fullMessage,
   projectCollection,
+  stripOData,
   type OutlookFolder,
   type OutlookMessage,
 } from '../view.js';
@@ -161,7 +162,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       );
       return minifiedResult({
         count: data.value?.length ?? 0,
-        items: data.value ?? [],
+        items: (data.value ?? []).map(stripOData),
       });
     },
   );

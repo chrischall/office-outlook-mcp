@@ -167,11 +167,16 @@ describe('calendar tools', () => {
     await h.close();
   });
 
-  it('omits the timezone Prefer header when none is asked for', async () => {
+  it('omits the timezone Prefer header when neither the caller nor the mailbox names one', async () => {
+    // Events now default to the MAILBOX's zone, so "none asked for" is only
+    // reached when the mailbox does not declare one either — this stub returns
+    // no `TimeZone`. The header must then be absent rather than sent empty.
     const client = stub();
     const h = await createTestHarness((s: McpServer) => registerCalendarTools(s, client));
     await h.callTool('outlook_list_events', { start: 'a', end: 'b' });
-    expect((client.get as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual({});
+    const calls = (client.get as ReturnType<typeof vi.fn>).mock.calls;
+    const viewCall = calls.find((c: unknown[]) => String(c[0]).includes("/me/calendarview"));
+    expect(viewCall?.[1]).toEqual({});
     await h.close();
   });
 

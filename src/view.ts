@@ -141,6 +141,27 @@ export function compactFolder(f: OutlookFolder): Record<string, unknown> {
   });
 }
 
+/**
+ * Drop OData's envelope keys (`@odata.id`, `@odata.etag`, `@odata.context`, …)
+ * from a record.
+ *
+ * `$select` does not suppress them: a contact selected down to six fields still
+ * arrives with a ~200-char `@odata.id` self-URL repeating the mailbox GUID and
+ * the item Id, which on a 50-item listing is most of the payload. The typed
+ * projections never had this problem because they name their fields; the tools
+ * that pass records through untouched did.
+ *
+ * Everything that is not an annotation survives, so this stays a projection of
+ * the envelope rather than of the record.
+ */
+export function stripOData<T extends Record<string, unknown>>(o: T): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (!k.startsWith('@odata.')) out[k] = v;
+  }
+  return out;
+}
+
 /** Drop `undefined` so a compact record does not carry empty keys. */
 function pruned<T extends Record<string, unknown>>(o: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};

@@ -65,6 +65,18 @@ describe('publish scaffold', () => {
     expect(pkg.publishConfig?.access).toBe('public');
   });
 
+  it('points the plugin at a config that resolves under a plugin install', () => {
+    // The two launch paths need DIFFERENT configs, which is why they are two
+    // files: a plugin install defines `${CLAUDE_PLUGIN_ROOT}` and a
+    // project-scoped `.mcp.json` does not. Sharing one file broke whichever
+    // path it was not written for.
+    const pluginMcp = read('.claude-plugin/plugin.json').mcp as string;
+    const cfg = read(join('.claude-plugin', pluginMcp.replace(/^\.\//, '')));
+    const server = cfg.mcpServers.outlook;
+    expect(server.args.join(' ')).toContain('${CLAUDE_PLUGIN_ROOT}');
+    expect(server.args.join(' ')).toContain('dist/bundle.js');
+  });
+
   it('ships the files an install and a registration need', () => {
     // `skills` and `mint.yaml` are both silent-omission traps: without them the
     // access skill never ships and an --npm registration reads a blank wizard.

@@ -47,7 +47,7 @@ Everything is optional — with nothing set, the server captures from the browse
 | `OUTLOOK_DISABLE_FETCHPROXY` | `1` to disable browser capture, requiring `OUTLOOK_ACCESS_TOKEN`. |
 | `OUTLOOK_API_BASE` | Override the REST base URL. Defaults to `https://outlook.office.com/api/v2.0`. |
 | `OUTLOOK_WS_PORT` | fetchproxy concentrator port. Defaults to `37149`, the fleet-wide shared port. |
-| `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Defaults to `30`. |
+| `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Bounds the WHOLE capture, both declared hosts included. Defaults to `30`. |
 | `OUTLOOK_TOKEN_CACHE` | `false` to stop caching the token between runs. |
 | `OUTLOOK_TOKEN_FILE` | Path to the cached token. Defaults to `~/.office-outlook-mcp/token.json`. |
 
@@ -66,8 +66,10 @@ Everything is optional — with nothing set, the server captures from the browse
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
-Mutating tools make **no network call** without `confirm: true` — they return a
-dry-run preview of exactly what would be sent.
+Mutating tools **write nothing** without `confirm: true` — they return a
+dry-run preview of exactly what would be sent. (`outlook_create_event` first
+reads the mailbox time zone, so its preview can name the zone it would book
+in; that is the one read a dry run makes.)
 
 ## Things worth knowing
 
@@ -81,6 +83,11 @@ dry-run preview of exactly what would be sent.
 - `search` and `unreadOnly` cannot be combined; the API rejects `$search`
   alongside `$filter`, so the tool refuses before making a doomed request.
 - Moving a message assigns it a **new id**.
+- `outlook_list_events` returns times in the **mailbox's own time zone** unless
+  `timeZone` overrides it. The API itself defaults to UTC, which silently reads
+  as a four-hour error on an Eastern mailbox.
+- Contact phone fields are `MobilePhone1`, not Graph's `MobilePhone`. The v2.0
+  Contact type rejects the Graph name with a 400.
 
 ## The lightweight alternative
 

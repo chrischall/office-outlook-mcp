@@ -2,8 +2,15 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, viewParam } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
-import { compactEvent, fullEvent, projectCollection, type OutlookEvent } from '../view.js';
+import {
+  compactEvent,
+  fullEvent,
+  projectCollection,
+  stripOData,
+  type OutlookEvent,
+} from '../view.js';
 import { VIEWS } from './mail.js';
+import { mailboxTimeZone } from '../timezone.js';
 
 const EVENT_SELECT =
   'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,BodyPreview';
@@ -41,6 +48,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       }),
     },
     async ({ view, start, end, timeZone, limit }) => {
+      const zone = timeZone ?? (await mailboxTimeZone(client));
       const data = await client.get<{ value?: OutlookEvent[] }>(
         `/me/calendarview${qs({
           startDateTime: start,
@@ -49,7 +57,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
           $orderby: 'Start/DateTime',
           $top: limit ?? 50,
         })}`,
-        timeZone ? { prefer: `outlook.timezone="${timeZone}"` } : {},
+        zone ? { prefer: `outlook.timezone="${zone}"` } : {},
       );
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return minifiedResult(data);
@@ -71,9 +79,10 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       }),
     },
     async ({ view, id, timeZone }) => {
+      const zone = timeZone ?? (await mailboxTimeZone(client));
       const data = await client.get<OutlookEvent>(
         `/me/events/${encodeURIComponent(id)}`,
-        timeZone ? { prefer: `outlook.timezone="${timeZone}"` } : {},
+        zone ? { prefer: `outlook.timezone="${zone}"` } : {},
       );
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return minifiedResult(data);
@@ -95,7 +104,10 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         `/me/calendars${qs({ $select: 'Id,Name,Color,CanEdit,Owner' })}`,
       );
       if (resolveView(view, VIEWS) === 'raw') return minifiedResult(data);
-      return minifiedResult({ count: data.value?.length ?? 0, items: data.value ?? [] });
+      return minifiedResult({
+        count: data.value?.length ?? 0,
+        items: (data.value ?? []).map(stripOData),
+      });
     },
   );
 }

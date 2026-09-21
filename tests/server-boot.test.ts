@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, copyFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,6 +91,29 @@ describe('built server boots', () => {
       // at dist/index.js.
       const tools = await handshake(binEntry, root);
       expect(tools.length).toBeGreaterThanOrEqual(18);
+    },
+    60_000,
+  );
+
+  it.runIf(existsSync(bundle))(
+    'boots from the repo .mcp.json the way a project-scoped config does',
+    async () => {
+      // The regression this exists for: `.mcp.json` launched
+      // `${CLAUDE_PLUGIN_ROOT}/dist/bundle.js`, which a PLUGIN install defines
+      // and a project-scoped load does NOT. Claude Code ran `node
+      // /dist/bundle.js`, the process died instantly, and the session reported
+      // only "CONNECTION_CLOSED" — auth looked broken when nothing had started.
+      // The plugin's own config keeps the variable; this file must not need it.
+      const cfg = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8')) as {
+        mcpServers: Record<string, { command: string; args: string[] }>;
+      };
+      const server = cfg.mcpServers.outlook;
+      expect(JSON.stringify(server)).not.toContain('CLAUDE_PLUGIN_ROOT');
+      // Resolved against the repo root, exactly as a project-scoped launch does.
+      const entry = join(root, server.args[server.args.length - 1]);
+      expect(existsSync(entry)).toBe(true);
+      const tools = await handshake(entry, root);
+      expect(tools).toContain('outlook_healthcheck');
     },
     60_000,
   );

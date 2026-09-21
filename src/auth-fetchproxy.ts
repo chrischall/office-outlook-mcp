@@ -16,7 +16,7 @@
  *   - that token authenticates plain server-side requests to
  *     `outlook.office.com/api/v2.0` with no bridge involved;
  *   - older tenants still serve the app from `outlook.office.com`, so both
- *     hosts are declared and captured concurrently.
+ *     hosts are declared and captured, under ONE overall window.
  *
  * We do NOT try to mint a token by calling an endpoint ourselves. There is no
  * such endpoint reachable from the page's origin — the token comes from MSAL's
@@ -65,6 +65,29 @@ const CAPTURE_DECL_OFFICE = {
 } as const;
 
 /**
+ * The hosts a token may be captured from — the two Outlook Web origins.
+ *
+ * Exported so the trust boundary below can be derived from them rather than
+ * restated.
+ */
+export const CAPTURE_HOSTS = [CAPTURE_DECL_CLOUD.host, CAPTURE_DECL_OFFICE.host] as const;
+
+/**
+ * The extension's trust boundary: exactly the hosts we capture from.
+ *
+ * These were the apex domains `cloud.microsoft` and `office.com`, which the
+ * extension reads as "any subdomain of either" — the whole of Microsoft 365
+ * granted to read one header off two known hosts. It is also what sent the
+ * pairing flow to `m365.cloud.microsoft/chat`, a tab nothing here needs.
+ *
+ * Narrowing costs nothing: the capture declarations were always these two
+ * hosts, and every API call the server makes afterwards is a plain server-side
+ * `fetch` that the bridge never sees. Verified live 2026-09-20 — capture still
+ * succeeded, and an already-paired extension did not ask to re-pair.
+ */
+export const TRUST_DOMAINS = [...CAPTURE_HOSTS];
+
+/**
  * How long to wait for the page to make a request we can read.
  *
  * The window IS the mechanism: capture resolves on the NEXT matching request,
@@ -109,6 +132,59 @@ function withFetch<T extends { capabilities?: readonly Capability[] }>(opts: T):
   };
 }
 
+/**
+ * Settle a set of per-host capture attempts under ONE overall deadline.
+ *
+ * `Promise.any` alone is not enough. The two declared hosts are documented as
+ * raced, but the bridge serializes them behind its single connection, so the
+ * wait was the sum rather than the max — measured live at 14.4s for a 5s window
+ * and 36s for a 20s one. At the 30s default that lands past the 60s request
+ * timeout an MCP client uses by default, so the host gave up before this code
+ * could report the real reason. The window is a promise about total wait, and
+ * this is what keeps it.
+ *
+ * Exported for the test that pins that bound.
+ */
+export async function raceCaptures(
+  attempts: readonly Promise<string>[],
+  windowMs: number,
+): Promise<string> {
+  // A rejection that loses the race must not surface as an unhandled rejection
+  // once the winner has already settled the caller.
+  for (const a of attempts) a.catch(() => {});
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `timed out after ${Math.round(windowMs / 1000)}s waiting for the page to ` +
+              'make a request we could read',
+          ),
+        ),
+      windowMs,
+    );
+  });
+
+  try {
+    // `any` resolves on the first SUCCESS rather than the first settle, so the
+    // host the user is not on failing does not sink the one they are on.
+    return await Promise.race([
+      Promise.any(attempts).catch((e: unknown) => {
+        throw new Error(
+          e instanceof AggregateError
+            ? e.errors.map((x) => (x as Error).message).join('; ')
+            : (e as Error).message,
+        );
+      }),
+      expiry,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Normalise a captured header to a bare token, dropping any `Bearer ` prefix. */
 export function stripBearer(raw: string): string {
   const m = /^\s*Bearer\s+(.+)$/i.exec(raw);
@@ -118,14 +194,16 @@ export function stripBearer(raw: string): string {
 /**
  * Capture an Outlook access token from the user's signed-in browser tab.
  *
- * Both hosts are raced: whichever the tab is actually on answers first, and the
- * other simply never resolves. Returns the bare token (no `Bearer ` prefix).
+ * Both hosts are attempted: whichever the tab is actually on answers first, and
+ * the other simply never resolves. The bridge serializes them, so the pair is
+ * held to one deadline by `raceCaptures` rather than to one deadline each.
+ * Returns the bare token (no `Bearer ` prefix).
  */
 export async function captureTokenViaFetchproxy(): Promise<string> {
   const transport = createFetchproxyTransport({
     ...withFetch(
       createBootstrapOpts({
-        domains: ['cloud.microsoft', 'office.com'],
+        domains: [...TRUST_DOMAINS],
         bootstrap: {
           captureHeaders: [{ ...CAPTURE_DECL_CLOUD }, { ...CAPTURE_DECL_OFFICE }],
         },
@@ -162,15 +240,10 @@ export async function captureTokenViaFetchproxy(): Promise<string> {
         }),
     );
 
-    // `any` resolves on the first SUCCESS rather than the first settle, so the
-    // host the user is not on failing does not sink the one they are on.
     try {
-      return await Promise.any(attempts);
+      return await raceCaptures(attempts, CAPTURE_TIMEOUT_MS);
     } catch (e) {
-      const detail =
-        e instanceof AggregateError
-          ? e.errors.map((x) => (x as Error).message).join('; ')
-          : (e as Error).message;
+      const detail = (e as Error).message;
       throw new Error(
         `could not capture an Outlook token from the browser (${detail}). ` +
           'Open a signed-in Outlook tab (outlook.cloud.microsoft or ' +
