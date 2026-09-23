@@ -7,10 +7,10 @@ import {
   compactMessage,
   fullMessage,
   projectCollection,
-  stripOData,
   type OutlookFolder,
   type OutlookMessage,
 } from '../view.js';
+import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 
 export const VIEWS = ['compact', 'full', 'raw'] as const;
 
@@ -58,10 +58,13 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       inputSchema: z.object({
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(200).optional().describe('Max folders (default 50)'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view, limit }) => {
-      const data = await client.get<{ value?: OutlookFolder[] }>(
+    async ({ view, limit, nextLink }) => {
+      const data = await fetchPage<{ value?: OutlookFolder[]; '@odata.nextLink'?: string }>(
+        client,
+        nextLink,
         `/me/mailfolders${qs({ $top: limit ?? 50 })}`,
       );
       if (resolveView(view, VIEWS) === 'raw') return minifiedResult(data);
@@ -88,9 +91,10 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           .string()
           .optional()
           .describe('Full-text search across the whole mailbox; cannot combine with unreadOnly'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view, folder, limit, skip, unreadOnly, search }) => {
+    async ({ view, folder, limit, skip, unreadOnly, search, nextLink }) => {
       if (search !== undefined && unreadOnly === true) {
         throw new McpToolError('`search` and `unreadOnly` cannot be combined.', {
           hint: 'Outlook rejects $search together with $filter. Search first, then filter the results.',
@@ -110,7 +114,11 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         params.$orderby = 'ReceivedDateTime desc';
         if (unreadOnly === true) params.$filter = 'IsRead eq false';
       }
-      const data = await client.get<{ value?: OutlookMessage[] }>(`${base}${qs(params)}`);
+      const data = await fetchPage<{ value?: OutlookMessage[]; '@odata.nextLink'?: string }>(
+        client,
+        nextLink,
+        `${base}${qs(params)}`,
+      );
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return minifiedResult(data);
       return minifiedResult(
@@ -152,18 +160,21 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ id }) => {
-      const data = await client.get<{ value?: Record<string, unknown>[] }>(
+    async ({ id, nextLink }) => {
+      const data = await fetchPage<{
+        value?: Record<string, unknown>[];
+        '@odata.nextLink'?: string;
+      }>(
+        client,
+        nextLink,
         `/me/messages/${encodeURIComponent(id)}/attachments${qs({
           $select: 'Id,Name,Size,ContentType',
         })}`,
       );
-      return minifiedResult({
-        count: data.value?.length ?? 0,
-        items: (data.value ?? []).map(stripOData),
-      });
+      return minifiedResult(plainCollection(data));
     },
   );
 }

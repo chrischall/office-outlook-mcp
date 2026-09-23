@@ -329,3 +329,80 @@ describe('write tools are confirm-gated', () => {
     await h.close();
   });
 });
+
+describe('list tools never truncate silently', () => {
+  const NEXT = 'https://outlook.office.com/api/v2.0/me/things?$skip=50';
+  const listTools = [
+    ['outlook_list_folders', registerMailTools, {}],
+    ['outlook_list_messages', registerMailTools, {}],
+    ['outlook_list_attachments', registerMailTools, { id: 'm1' }],
+    ['outlook_list_events', registerCalendarTools, { start: 'a', end: 'b' }],
+    ['outlook_list_calendars', registerCalendarTools, {}],
+    ['outlook_list_contacts', registerDirectoryTools, {}],
+    ['outlook_list_people', registerDirectoryTools, {}],
+    ['outlook_list_tasks', registerDirectoryTools, {}],
+  ] as const;
+
+  it.each(listTools)('%s surfaces nextLink when there are more results', async (name, register, args) => {
+    // A 51st task, or a 201st occurrence, must not produce a listing that
+    // looks complete: the model would then say with confidence that an item
+    // does not exist.
+    const get = vi.fn(async (path: string) => {
+      if (path === '/me/MailboxSettings') return { TimeZone: 'UTC' };
+      return { value: [{ Id: 'x1' }], '@odata.nextLink': NEXT };
+    });
+    const { client } = stubClient({ get });
+    const h = await harnessFor(register, client);
+    const res = parseToolResult<{ count: number; nextLink?: string }>(await h.callTool(name, args));
+    expect(res.count).toBe(1);
+    expect(res.nextLink).toBe(NEXT);
+    await h.close();
+  });
+
+  it.each(listTools)('%s omits nextLink on the last page', async (name, register, args) => {
+    const get = vi.fn(async (path: string) => {
+      if (path === '/me/MailboxSettings') return { TimeZone: 'UTC' };
+      return { value: [{ Id: 'x1' }] };
+    });
+    const { client } = stubClient({ get });
+    const h = await harnessFor(register, client);
+    const res = parseToolResult<Record<string, unknown>>(await h.callTool(name, args));
+    expect(res).not.toHaveProperty('nextLink');
+    await h.close();
+  });
+
+  it.each(listTools)('%s follows a nextLink it is given', async (name, register, args) => {
+    const get = vi.fn(async (path: string) => {
+      if (path === '/me/MailboxSettings') return { TimeZone: 'UTC' };
+      return { value: [] };
+    });
+    const getAbsolute = vi.fn(async (_url: string, _opts?: unknown) => ({ value: [{ Id: 'p2' }] }));
+    const { client } = stubClient({ get, getAbsolute });
+    const h = await harnessFor(register, client);
+    const res = parseToolResult<{ count: number }>(
+      await h.callTool(name, { ...args, nextLink: NEXT }),
+    );
+    expect(getAbsolute).toHaveBeenCalledTimes(1);
+    expect(getAbsolute.mock.calls[0][0]).toBe(NEXT);
+    // The first-page request is not made at all.
+    expect(get.mock.calls.filter(([p]) => p !== '/me/MailboxSettings')).toHaveLength(0);
+    expect(res.count).toBe(1);
+    await h.close();
+  });
+
+  it('keeps the calendar time zone when following an events nextLink', async () => {
+    const getAbsolute = vi.fn(async (_url: string, _opts?: unknown) => ({ value: [] }));
+    const { client } = stubClient({ getAbsolute });
+    const h = await harnessFor(registerCalendarTools, client);
+    await h.callTool('outlook_list_events', {
+      start: 'a',
+      end: 'b',
+      timeZone: 'Eastern Standard Time',
+      nextLink: NEXT,
+    });
+    expect(getAbsolute.mock.calls[0][1]).toMatchObject({
+      prefer: 'outlook.timezone="Eastern Standard Time"',
+    });
+    await h.close();
+  });
+});

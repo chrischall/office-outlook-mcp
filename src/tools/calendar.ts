@@ -6,9 +6,9 @@ import {
   compactEvent,
   fullEvent,
   projectCollection,
-  stripOData,
   type OutlookEvent,
 } from '../view.js';
+import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 import { VIEWS } from './mail.js';
 import { mailboxTimeZone } from '../timezone.js';
 
@@ -45,11 +45,14 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
             'Windows time-zone name for the returned times, e.g. "Eastern Standard Time". NOT an IANA name like America/New_York.',
           ),
         limit: z.number().int().min(1).max(200).optional().describe('Max events (default 50)'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view, start, end, timeZone, limit }) => {
+    async ({ view, start, end, timeZone, limit, nextLink }) => {
       const zone = timeZone ?? (await mailboxTimeZone(client));
-      const data = await client.get<{ value?: OutlookEvent[] }>(
+      const data = await fetchPage<{ value?: OutlookEvent[]; '@odata.nextLink'?: string }>(
+        client,
+        nextLink,
         `/me/calendarview${qs({
           startDateTime: start,
           endDateTime: end,
@@ -97,17 +100,16 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view }) => {
-      const data = await client.get<{ value?: Record<string, unknown>[] }>(
-        `/me/calendars${qs({ $select: 'Id,Name,Color,CanEdit,Owner' })}`,
-      );
+    async ({ view, nextLink }) => {
+      const data = await fetchPage<{
+        value?: Record<string, unknown>[];
+        '@odata.nextLink'?: string;
+      }>(client, nextLink, `/me/calendars${qs({ $select: 'Id,Name,Color,CanEdit,Owner' })}`);
       if (resolveView(view, VIEWS) === 'raw') return minifiedResult(data);
-      return minifiedResult({
-        count: data.value?.length ?? 0,
-        items: (data.value ?? []).map(stripOData),
-      });
+      return minifiedResult(plainCollection(data));
     },
   );
 }
