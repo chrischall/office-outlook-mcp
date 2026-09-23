@@ -1,7 +1,7 @@
 {
   "name": "office-outlook-mcp",
   "displayName": "Outlook (Microsoft 365)",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts and tasks, and send mail with confirmation, using your signed-in browser session",
   "author": {
     "name": "Chris Hall",

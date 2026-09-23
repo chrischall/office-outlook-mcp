@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.5...v0.2.0) (2026-09-23)
+
+
+### Features
+
+* **tools:** paginate every list tool via nextLink instead of truncating silently ([#15](https://github.com/chrischall/office-outlook-mcp/issues/15)) ([ba767b2](https://github.com/chrischall/office-outlook-mcp/commit/ba767b2ddc421e7739f372a42ec7083b4387fb51))
+
+
+### Bug Fixes
+
+* **mail:** clarify that search+unreadOnly is only rejected on a first-page request ([#20](https://github.com/chrischall/office-outlook-mcp/issues/20)) ([7599fbe](https://github.com/chrischall/office-outlook-mcp/commit/7599fbe5e825e17e0c9583c1aff99008bfbe834a))
+* **mail:** stop rejecting search+unreadOnly when following a nextLink ([#18](https://github.com/chrischall/office-outlook-mcp/issues/18)) ([2a08a9a](https://github.com/chrischall/office-outlook-mcp/commit/2a08a9a85a1f1091a701ad073a91096b70b8e0a0))
+
 ## [0.1.5](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.4...v0.1.5) (2026-09-23)
 
 
