@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.4...v0.1.5) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deps:** require zod ^4.6.5 to match @chrischall/mcp-utils 2.4.0 ([#14](https://github.com/chrischall/office-outlook-mcp/issues/14)) ([f443913](https://github.com/chrischall/office-outlook-mcp/commit/f443913a9b8f4bd6fe9feae6907fe83a9bee3d26))
+* **deps:** upgrade @chrischall/mcp-utils to 2.4.0 and @fetchproxy/* to 3.2.0 ([#12](https://github.com/chrischall/office-outlook-mcp/issues/12)) ([6556287](https://github.com/chrischall/office-outlook-mcp/commit/6556287dee2f525459766e216347502d0c01da75))
+
 ## [0.1.4](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.3...v0.1.4) (2026-09-21)
 
 

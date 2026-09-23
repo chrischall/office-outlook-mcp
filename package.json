@@ -1,6 +1,6 @@
 {
   "name": "@chrischall/office-outlook-mcp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "mcpName": "io.github.chrischall/office-outlook-mcp",
   "description": "Outlook / Microsoft 365 MCP server for Claude — developed and maintained by AI (Claude Code)",
   "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
