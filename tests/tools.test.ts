@@ -423,4 +423,19 @@ describe('list tools never truncate silently', () => {
     expect(parseToolResult<{ count: number }>(res).count).toBe(1);
     await h.close();
   });
+
+  it('documents the search+unreadOnly conflict as first-page only', async () => {
+    // The descriptions must match the behaviour above: echoing both arguments
+    // back alongside nextLink is fine, so the schema must not forbid it outright.
+    const { client } = stubClient();
+    const h = await harnessFor(registerMailTools, client);
+    const { tools } = await h.client.listTools();
+    const tool = tools.find((t) => t.name === 'outlook_list_messages')!;
+    expect(tool.description).toMatch(/first[- ]page/i);
+    const search = (tool.inputSchema as { properties: Record<string, { description?: string }> })
+      .properties.search;
+    expect(search.description).toMatch(/first[- ]page/i);
+    expect(search.description).toMatch(/nextLink/);
+    await h.close();
+  });
 });
