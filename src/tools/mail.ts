@@ -76,7 +76,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_list_messages',
     {
       description:
-        "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined (the API rejects $search with $filter); pass `search` alone to search the whole mailbox.",
+        "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless.",
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
@@ -90,7 +90,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         search: z
           .string()
           .optional()
-          .describe('Full-text search across the whole mailbox; cannot combine with unreadOnly'),
+          .describe('Full-text search across the whole mailbox; cannot combine with unreadOnly on a first page (ignored with nextLink)'),
         nextLink: nextLinkParam,
       }),
     },
