@@ -137,7 +137,40 @@ describe('requests', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     await c.getAbsolute(`${DEFAULT_API_BASE}/me/messages?$skip=10`);
-    expect(String((fetchImpl.mock.calls[0] as never[])[0])).toContain('$skip=10');
+    // Exact URL: the link already carries the base path, so it must not be
+    // appended to the base a second time (…/api/v2.0/api/v2.0/me/… → 404).
+    expect(String((fetchImpl.mock.calls[0] as never[])[0])).toBe(
+      `${DEFAULT_API_BASE}/me/messages?$skip=10`,
+    );
+  });
+
+  it('refuses a same-origin link that leaves the API base path', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ value: [] }));
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(c.getAbsolute('https://outlook.office.com/owa/service.svc')).rejects.toThrow(
+      /Refusing to follow a link/,
+    );
+    await expect(
+      c.getAbsolute('https://outlook.office.com/api/v2.0evil/me/messages'),
+    ).rejects.toThrow(/Refusing to follow a link/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('carries Prefer options when following a link', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ value: [] }));
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await c.getAbsolute(`${DEFAULT_API_BASE}/me/calendarview?$skip=50`, {
+      prefer: 'outlook.timezone="UTC"',
+    });
+    expect(preferOf(fetchImpl, 0)).toBe('outlook.timezone="UTC"');
   });
 });
 

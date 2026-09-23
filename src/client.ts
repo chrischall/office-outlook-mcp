@@ -230,17 +230,39 @@ export class OutlookClient {
     });
   }
 
-  /** GET an absolute URL — used only to follow `@odata.nextLink`. */
-  async getAbsolute<T>(url: string): Promise<T> {
+  /**
+   * GET an absolute URL — used only to follow `@odata.nextLink`.
+   *
+   * The link is absolute and already carries the base path
+   * (`https://outlook.office.com/api/v2.0/me/messages?$skip=25`), while the
+   * underlying client appends every path to that same base. So the base path is
+   * stripped here, and a link that is not under it — another origin, or another
+   * path on the same host — is refused rather than sent the bearer token.
+   */
+  async getAbsolute<T>(
+    url: string,
+    opts: { text?: boolean; prefer?: string } = {},
+  ): Promise<T> {
     this.#requireConfigured();
     const base = new URL(this.#baseUrl);
-    const target = new URL(url);
-    if (target.origin !== base.origin) {
-      throw new McpToolError(`Refusing to follow a link to ${target.origin}.`, {
-        hint: 'Pagination links must stay on the Outlook API host.',
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      throw new McpToolError(`Refusing to follow a link that is not a URL: ${url}`, {
+        hint: 'Pass the nextLink value exactly as a previous listing returned it.',
       });
     }
-    return this.#client().fetchJson<T>('GET', target.pathname + target.search);
+    const prefix = base.pathname.replace(/\/+$/, '');
+    if (
+      target.origin !== base.origin ||
+      !(target.pathname === prefix || target.pathname.startsWith(`${prefix}/`))
+    ) {
+      throw new McpToolError(`Refusing to follow a link to ${target.origin}${target.pathname}.`, {
+        hint: `Pagination links must stay under the Outlook API base (${this.#baseUrl}).`,
+      });
+    }
+    return this.get<T>(target.pathname.slice(prefix.length) + target.search, opts);
   }
 
   /**
