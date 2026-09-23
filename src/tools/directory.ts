@@ -4,6 +4,7 @@ import { minifiedResult, resolveView, viewParam } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
 import { stripOData } from '../view.js';
 import { VIEWS } from './mail.js';
+import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 
 function qs(params: Record<string, string | number | undefined>): string {
   const parts: string[] = [];
@@ -14,12 +15,11 @@ function qs(params: Record<string, string | number | undefined>): string {
   return parts.length ? `?${parts.join('&')}` : '';
 }
 
-function collection(
-  data: { value?: Record<string, unknown>[] },
-  raw: boolean,
-): Record<string, unknown> {
+type Page = { value?: Record<string, unknown>[]; '@odata.nextLink'?: string };
+
+function collection(data: Page, raw: boolean): Record<string, unknown> {
   if (raw) return data as Record<string, unknown>;
-  return { count: data.value?.length ?? 0, items: (data.value ?? []).map(stripOData) };
+  return plainCollection(data);
 }
 
 export function registerDirectoryTools(server: McpServer, client: OutlookClient): void {
@@ -55,10 +55,13 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(200).optional().describe('Max contacts (default 50)'),
         skip: z.number().int().min(0).optional().describe('Offset for paging'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view, limit, skip }) => {
-      const data = await client.get<{ value?: Record<string, unknown>[] }>(
+    async ({ view, limit, skip, nextLink }) => {
+      const data = await fetchPage<Page>(
+        client,
+        nextLink,
         `/me/contacts${qs({
           $top: limit ?? 50,
           $skip: skip,
@@ -80,10 +83,13 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       inputSchema: z.object({
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(100).optional().describe('Max people (default 25)'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view, limit }) => {
-      const data = await client.get<{ value?: Record<string, unknown>[] }>(
+    async ({ view, limit, nextLink }) => {
+      const data = await fetchPage<Page>(
+        client,
+        nextLink,
         `/me/people${qs({
           $top: limit ?? 25,
           $select: 'Id,DisplayName,ScoredEmailAddresses,JobTitle,CompanyName',
@@ -101,10 +107,13 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       inputSchema: z.object({
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(200).optional().describe('Max tasks (default 50)'),
+        nextLink: nextLinkParam,
       }),
     },
-    async ({ view, limit }) => {
-      const data = await client.get<{ value?: Record<string, unknown>[] }>(
+    async ({ view, limit, nextLink }) => {
+      const data = await fetchPage<Page>(
+        client,
+        nextLink,
         `/me/tasks${qs({
           $top: limit ?? 50,
           $select: 'Id,Subject,Status,Importance,DueDateTime,CompletedDateTime',
