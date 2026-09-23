@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
 import { previewUnlessConfirmed, schemaConfirm } from './_confirm.js';
+import { OUTBOUND_DESCRIPTION_SUFFIX } from './_untrusted.js';
 import { mailboxTimeZone } from '../timezone.js';
 
 const recipientList = z
@@ -30,7 +31,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_send_mail',
     {
       description:
-        'Send an email from the signed-in mailbox. Requires confirm:true — without it this makes no network call and returns a preview of exactly what would be sent.',
+        'Send an email from the signed-in mailbox. Requires confirm:true — without it this makes no network call and returns a preview of exactly what would be sent.' +
+        OUTBOUND_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: z.object({
         to: recipientList,
@@ -186,7 +188,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_event',
     {
       description:
-        'Create a calendar event. Requires confirm:true. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name.',
+        'Create a calendar event. Requires confirm:true. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation.' +
+        OUTBOUND_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
         subject: z.string().describe('Event title'),
