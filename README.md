@@ -107,6 +107,13 @@ dry-run preview of exactly what would be sent. (`outlook_create_event` first
 reads the mailbox time zone, so its preview can name the zone it would book
 in; that is the one read a dry run makes.)
 
+Mail and event text is written by other people, so `outlook_list_messages`,
+`outlook_get_message`, `outlook_list_events` and `outlook_get_event` wrap every
+result (all views) in an untrusted-content envelope — `untrusted_content: true`
+plus a `note` telling the model to treat the text as data, never instructions.
+`confirm: true` is still a flag the model sets, so an MCP client that asks you
+before running non-read-only tools remains the real guard on outbound sends.
+
 ## Things worth knowing
 
 - Fields are **PascalCase** (`ReceivedDateTime`, `IsRead`). This is the Outlook

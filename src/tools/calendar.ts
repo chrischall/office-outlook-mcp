@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, viewParam } from '@chrischall/mcp-utils';
+import { untrustedResult, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 import type { OutlookClient } from '../client.js';
 import {
   compactEvent,
@@ -29,7 +30,8 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     'outlook_list_events',
     {
       description:
-        'List calendar events in a date window. This uses the calendar VIEW, which expands recurring series into their individual occurrences — the right tool for "what is on my schedule". Times are returned in `timeZone` when given.',
+        'List calendar events in a date window. This uses the calendar VIEW, which expands recurring series into their individual occurrences — the right tool for "what is on my schedule". Times are returned in `timeZone` when given.' +
+        UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
@@ -63,8 +65,8 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         zone ? { prefer: `outlook.timezone="${zone}"` } : {},
       );
       const v = resolveView(view, VIEWS);
-      if (v === 'raw') return minifiedResult(data);
-      return minifiedResult(
+      if (v === 'raw') return untrustedResult(data);
+      return untrustedResult(
         projectCollection(data, v === 'full' ? fullEvent : compactEvent, 'event'),
       );
     },
@@ -73,7 +75,9 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
   server.registerTool(
     'outlook_get_event',
     {
-      description: 'Get one calendar event in full, including attendees and their responses.',
+      description:
+        'Get one calendar event in full, including attendees and their responses.' +
+        UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
@@ -88,8 +92,8 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         zone ? { prefer: `outlook.timezone="${zone}"` } : {},
       );
       const v = resolveView(view, VIEWS);
-      if (v === 'raw') return minifiedResult(data);
-      return minifiedResult(v === 'compact' ? compactEvent(data) : fullEvent(data));
+      if (v === 'raw') return untrustedResult(data as Record<string, unknown>);
+      return untrustedResult(v === 'compact' ? compactEvent(data) : fullEvent(data));
     },
   );
 
