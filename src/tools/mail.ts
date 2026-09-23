@@ -95,7 +95,9 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       }),
     },
     async ({ view, folder, limit, skip, unreadOnly, search, nextLink }) => {
-      if (search !== undefined && unreadOnly === true) {
+      // With nextLink the filters come from the link and are ignored here, so
+      // the conflict only matters for a first-page request.
+      if (nextLink === undefined && search !== undefined && unreadOnly === true) {
         throw new McpToolError('`search` and `unreadOnly` cannot be combined.', {
           hint: 'Outlook rejects $search together with $filter. Search first, then filter the results.',
         });

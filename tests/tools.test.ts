@@ -405,4 +405,22 @@ describe('list tools never truncate silently', () => {
     });
     await h.close();
   });
+
+  it('ignores search+unreadOnly when following a messages nextLink, as documented', async () => {
+    // Once nextLink is set the filter arguments are taken from the link, so a
+    // model that echoes its original arguments back must not be rejected.
+    const getAbsolute = vi.fn(async (_url: string, _opts?: unknown) => ({ value: [{ Id: 'p2' }] }));
+    const { client } = stubClient({ getAbsolute });
+    const h = await harnessFor(registerMailTools, client);
+    const res = await h.callTool('outlook_list_messages', {
+      search: 'x',
+      unreadOnly: true,
+      nextLink: NEXT,
+    });
+    expect(res.isError).not.toBe(true);
+    expect(getAbsolute).toHaveBeenCalledTimes(1);
+    expect(getAbsolute.mock.calls[0][0]).toBe(NEXT);
+    expect(parseToolResult<{ count: number }>(res).count).toBe(1);
+    await h.close();
+  });
 });
