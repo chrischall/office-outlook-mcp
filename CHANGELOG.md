@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.0...v0.3.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv from 18.0.1 to 18.0.2 in the production-dependencies group ([#25](https://github.com/chrischall/office-outlook-mcp/issues/25)) ([b35ad69](https://github.com/chrischall/office-outlook-mcp/commit/b35ad698712d6e0e7700ff6dbb7f0de5509fbd82))
+
 ## [0.3.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.2.0...v0.3.0) (2026-09-24)
 
 
