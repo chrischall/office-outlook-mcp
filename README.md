@@ -1,7 +1,7 @@
 # office-outlook-mcp
 
 MCP server for **Outlook / Microsoft 365** — mail, folders, calendar, contacts
-and tasks, with confirm-gated sending.
+and tasks, with confirmation-gated sending.
 
 > This project was developed and is maintained by AI (Claude Code). Use at your
 > own discretion.
@@ -95,24 +95,43 @@ Everything is optional — with nothing set, the server captures from the browse
 `outlook_get_mailbox_settings`, `outlook_list_contacts`, `outlook_list_people`,
 `outlook_list_tasks`
 
-**Write** (all require `confirm: true`) — `outlook_send_mail`,
+**Write** (all ask you to confirm first — see [Confirmations](#confirmations)) — `outlook_send_mail`,
 `outlook_create_draft`, `outlook_mark_read`, `outlook_move_message`,
 `outlook_create_event`
 
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
-Mutating tools **write nothing** without `confirm: true` — they return a
-dry-run preview of exactly what would be sent. (`outlook_create_event` first
-reads the mailbox time zone, so its preview can name the zone it would book
-in; that is the one read a dry run makes.)
+Mutating tools **write nothing** until you confirm — see
+[Confirmations](#confirmations). The preview shows exactly what would be sent
+(action, method, path and body). (`outlook_create_event` first reads the
+mailbox time zone, so its preview can name the zone it would book in; that is
+the one read a preview makes.)
 
 Mail and event text is written by other people, so `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_events` and `outlook_get_event` wrap every
 result (all views) in an untrusted-content envelope — `untrusted_content: true`
 plus a `note` telling the model to treat the text as data, never instructions.
-`confirm: true` is still a flag the model sets, so an MCP client that asks you
-before running non-read-only tools remains the real guard on outbound sends.
+On a client that cannot show a confirmation prompt, the confirmToken is still
+something the model passes back itself, so keep `MCP_CONFIRM_MODE=ask-user`
+(the default) and approve each preview in chat — or use a client that asks you
+before running non-read-only tools — as the real guard on outbound sends.
+
+## Confirmations
+
+Every write asks you to confirm before anything is sent or changed. A client
+that can show a confirmation prompt (Claude Code) shows one. On a client that
+cannot, the first call does nothing and returns a `confirmation-required`
+preview plus a `confirmToken`; only a repeat call with that token performs the
+write. The token is single-use, expires, and is bound to the exact arguments —
+change anything between the two calls and it is refused (`DRAFT_CHANGED`) with
+a fresh preview.
+
+| variable | default | |
+|---|---|---|
+| `MCP_CONFIRM_MODE` | `ask-user` | What a write does on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop). `ask-user`: two steps — the first call does nothing and returns a preview plus a token, and the model must get your approval in chat before calling again with it. `auto`: the same two steps, but the model may use the token after reviewing the preview itself. `refuse`: writes are refused on such clients. A client that can show prompts (Claude Code) always gets the real prompt. An unrecognised value is treated as `refuse`. |
+| `MCP_CONFIRM_TTL_SECONDS` | `600` | How long a token stays valid. |
+| `MCP_CONFIRM_SECRET` | random per process | Signing key; set it only if tokens must survive a server restart. |
 
 ## Things worth knowing
 
@@ -137,7 +156,7 @@ before running non-read-only tools remains the real guard on outbound sends.
 If you only need Outlook access from Claude Code on this machine, the
 `skills/outlook-fpx` access skill in this repo does the same reads with `fpx` +
 `curl` and no server at all. The MCP earns its keep when you want typed tools,
-confirm-gated writes, or reach from claude.ai.
+confirmation-gated writes, or reach from claude.ai.
 
 ## Development
 

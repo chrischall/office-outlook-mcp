@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
+import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { createTokenCache, tokenCachePath, reportCacheWriteFailure } from '../src/token-cache.js';
 import { registerDirectoryTools } from '../src/tools/directory.js';
@@ -310,6 +310,12 @@ describe('healthcheck', () => {
   });
 });
 
+/** Both phases of the confirm-token flow: preview + token, then the write. */
+async function confirmedCall(h: TestHarness, name: string, args: Record<string, unknown>) {
+  const first = parseToolResult<{ confirmToken?: string }>(await h.callTool(name, args));
+  return h.callTool(name, { ...args, confirmToken: first.confirmToken });
+}
+
 describe('confirmed write paths', () => {
   it('creates a draft and reports the new id', async () => {
     const client = stub();
@@ -317,8 +323,8 @@ describe('confirmed write paths', () => {
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const out = parseToolResult<{ created: boolean; Id: string }>(
-      await h.callTool('outlook_create_draft', {
-        to: ['a@example.com'], cc: ['c@example.com'], subject: 's', body: 'b', html: true, confirm: true,
+      await confirmedCall(h, 'outlook_create_draft', {
+        to: ['a@example.com'], cc: ['c@example.com'], subject: 's', body: 'b', html: true,
       }),
     );
     expect(out).toMatchObject({ created: true, Id: 'd1' });
@@ -334,7 +340,7 @@ describe('confirmed write paths', () => {
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const out = parseToolResult<{ moved: boolean; newId: string; note: string }>(
-      await h.callTool('outlook_move_message', { id: 'm1', destination: 'archive', confirm: true }),
+      await confirmedCall(h, 'outlook_move_message', { id: 'm1', destination: 'archive' }),
     );
     expect(out.moved).toBe(true);
     expect(out.newId).toBe('new');
@@ -347,8 +353,8 @@ describe('confirmed write paths', () => {
     (client.write as ReturnType<typeof vi.fn>).mockResolvedValue({ Id: 'e9' });
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
-    await h.callTool('outlook_create_event', {
-      subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00', confirm: true,
+    await confirmedCall(h, 'outlook_create_event', {
+      subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00',
     });
     expect((client.write as ReturnType<typeof vi.fn>).mock.calls[0][2]).toMatchObject({
       Start: { TimeZone: 'UTC' },
@@ -361,9 +367,9 @@ describe('confirmed write paths', () => {
     (client.write as ReturnType<typeof vi.fn>).mockResolvedValue({ Id: 'e9' });
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
-    await h.callTool('outlook_create_event', {
+    await confirmedCall(h, 'outlook_create_event', {
       subject: 's', start: 'a', end: 'b', timeZone: 'Eastern Standard Time',
-      location: 'Room 1', body: 'agenda', attendees: ['x@y.z'], confirm: true,
+      location: 'Room 1', body: 'agenda', attendees: ['x@y.z'],
     });
     expect((client.write as ReturnType<typeof vi.fn>).mock.calls[0][2]).toMatchObject({
       Location: { DisplayName: 'Room 1' },
@@ -378,8 +384,8 @@ describe('confirmed write paths', () => {
     const client = stub();
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
-    await h.callTool('outlook_send_mail', {
-      to: ['a@example.com'], subject: 's', body: 'b', saveToSentItems: false, confirm: true,
+    await confirmedCall(h, 'outlook_send_mail', {
+      to: ['a@example.com'], subject: 's', body: 'b', saveToSentItems: false,
     });
     expect((client.write as ReturnType<typeof vi.fn>).mock.calls[0][2]).toMatchObject({
       SaveToSentItems: false,
@@ -391,10 +397,10 @@ describe('confirmed write paths', () => {
     const client = stub();
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
-    const out = parseToolResult<{ action: string }>(
+    const out = parseToolResult<{ preview: { action: string } }>(
       await h.callTool('outlook_send_mail', { subject: 's', body: 'b' }),
     );
-    expect(out.action).toContain('(no recipients)');
+    expect(out.preview.action).toContain('(no recipients)');
     await h.close();
   });
 });

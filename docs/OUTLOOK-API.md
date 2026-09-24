@@ -109,8 +109,9 @@ invalid body and receiving **400**, not 401/403/404:
 
 **No write was executed during the build** — no mail was sent and nothing in
 the mailbox was mutated. The payload shapes the client sends are therefore
-*shapes*, not round-tripped captures, and every mutating tool is confirm-gated
-with a dry-run preview.
+*shapes*, not round-tripped captures, and every mutating tool asks for
+confirmation first — a prompt where the client supports one, otherwise a
+preview plus a single-use confirmToken (`MCP_CONFIRM_MODE`).
 
 `outlook_mark_read` verifies by re-reading `IsRead` — the field the write
 actually requested — rather than trusting the status code, and reports a

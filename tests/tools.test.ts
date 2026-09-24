@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
+import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerMailTools } from '../src/tools/mail.js';
 import { registerWriteTools } from '../src/tools/writes.js';
@@ -30,6 +30,15 @@ function stubClient(overrides: Partial<Record<string, unknown>> = {}) {
 
 const harnessFor = (register: (s: McpServer, c: OutlookClient) => void, client: OutlookClient) =>
   createTestHarness((server: McpServer) => register(server, client));
+
+/**
+ * Run a gated write through both phases of the confirm-token flow: the first
+ * call returns a preview and a token, the second (with the token) writes.
+ */
+async function confirmedCall(h: TestHarness, name: string, args: Record<string, unknown>) {
+  const first = parseToolResult<{ confirmToken?: string }>(await h.callTool(name, args));
+  return h.callTool(name, { ...args, confirmToken: first.confirmToken });
+}
 
 describe('read tools', () => {
   it('defaults to the inbox, newest first, without fetching bodies', async () => {
@@ -227,7 +236,7 @@ describe('read tools', () => {
   });
 });
 
-describe('write tools are confirm-gated', () => {
+describe('write tools are confirmation-gated', () => {
   const writeTools = [
     ['outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }],
     ['outlook_create_draft', { to: ['a@example.com'], subject: 's', body: 'b' }],
@@ -247,43 +256,44 @@ describe('write tools are confirm-gated', () => {
     });
     const { client, calls } = stubClient({ get });
     const h = await harnessFor(registerWriteTools, client);
-    const res = parseToolResult<{ action?: string; willSend?: { Start?: { TimeZone?: string } } }>(
+    const res = parseToolResult<{
+      preview?: { action?: string; willSend?: { Start?: { TimeZone?: string } } };
+    }>(
       await h.callTool('outlook_create_event', {
         subject: 's',
         start: '2026-09-22T15:00:00',
         end: '2026-09-22T16:00:00',
       }),
     );
-    expect(res.willSend?.Start?.TimeZone).toBe('Eastern Standard Time');
-    expect(res.action).toContain('Eastern Standard Time');
-    // Still a dry run: the zone lookup is a GET, and nothing was written.
+    expect(res.preview?.willSend?.Start?.TimeZone).toBe('Eastern Standard Time');
+    expect(res.preview?.action).toContain('Eastern Standard Time');
+    // Still only a preview: the zone lookup is a GET, and nothing was written.
     expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
     await h.close();
   });
 
-  it.each(writeTools)('%s writes nothing without confirm', async (name, args) => {
+  it.each(writeTools)('%s writes nothing without a confirmToken', async (name, args) => {
     // The gate stops MUTATIONS. `outlook_create_event` first reads the mailbox
     // time zone so the preview can state the zone it would book in — a
     // read-only GET, and the difference between a preview worth reading and
     // one that says 3pm while meaning 11am.
     const { client, calls } = stubClient();
     const h = await harnessFor(registerWriteTools, client);
-    const res = parseToolResult<{ dryRun?: boolean }>(await h.callTool(name, { ...args }));
-    expect(res.dryRun).toBe(true);
+    const res = parseToolResult<{ status?: string }>(await h.callTool(name, { ...args }));
+    expect(res.status).toBe('confirmation-required');
     expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
     await h.close();
   });
 
-  it('sends only when confirmed, and reports the recipients it used', async () => {
+  it('sends only with a confirmToken, and reports the recipients it used', async () => {
     const { client, calls } = stubClient();
     const h = await harnessFor(registerWriteTools, client);
     const res = parseToolResult<{ sent?: boolean; recipients?: string }>(
-      await h.callTool('outlook_send_mail', {
+      await confirmedCall(h, 'outlook_send_mail', {
         to: ['a@example.com'],
         cc: ['b@example.com'],
         subject: 'Subj',
         body: 'Body',
-        confirm: true,
       }),
     );
     expect(res.sent).toBe(true);
@@ -306,7 +316,7 @@ describe('write tools are confirm-gated', () => {
     const { client, calls } = stubClient();
     const h = await harnessFor(registerWriteTools, client);
     const res = parseToolResult<{ updated?: boolean }>(
-      await h.callTool('outlook_mark_read', { id: 'm1', isRead: true, confirm: true }),
+      await confirmedCall(h, 'outlook_mark_read', { id: 'm1', isRead: true }),
     );
     expect(res.updated).toBe(true);
     // PATCH, then a GET that re-reads the field the write requested.
@@ -322,7 +332,7 @@ describe('write tools are confirm-gated', () => {
     });
     const h = await harnessFor(registerWriteTools, client);
     const res = parseToolResult<{ updated?: boolean; warning?: string }>(
-      await h.callTool('outlook_mark_read', { id: 'm1', isRead: true, confirm: true }),
+      await confirmedCall(h, 'outlook_mark_read', { id: 'm1', isRead: true }),
     );
     expect(res.updated).toBe(false);
     expect(res.warning).toMatch(/did not change/);
