@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
-import { previewUnlessConfirmed, schemaConfirm } from './_confirm.js';
+import { CONFIRM_DESCRIPTION, confirmTokenParam, confirmWrite } from './_confirm.js';
 import { OUTBOUND_DESCRIPTION_SUFFIX } from './_untrusted.js';
 import { mailboxTimeZone } from '../timezone.js';
 
@@ -31,7 +31,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_send_mail',
     {
       description:
-        'Send an email from the signed-in mailbox. Requires confirm:true — without it this makes no network call and returns a preview of exactly what would be sent.' +
+        'Send an email from the signed-in mailbox.' +
+        CONFIRM_DESCRIPTION +
+        ' The preview shows exactly what would be sent.' +
         OUTBOUND_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: z.object({
@@ -42,10 +44,10 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         body: z.string().describe('Message body'),
         html: z.boolean().optional().describe('Send the body as HTML (default: plain text)'),
         saveToSentItems: z.boolean().optional().describe('Keep a copy in Sent Items (default true)'),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ to, cc, bcc, subject, body, html, saveToSentItems, confirm }) => {
+    async ({ to, cc, bcc, subject, body, html, saveToSentItems, confirmToken }, ctx) => {
       const payload = {
         Message: {
           ...messageBody(subject, body, html),
@@ -56,13 +58,17 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         SaveToSentItems: saveToSentItems !== false,
       };
       const recipients = [...(to ?? []), ...(cc ?? []), ...(bcc ?? [])].join(', ');
-      const gate = previewUnlessConfirmed(
-        confirm,
-        `Send mail "${subject}" to ${recipients || '(no recipients)'}`,
-        'POST',
-        '/me/sendmail',
-        payload,
-      );
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_send_mail',
+        action: 'mail.send',
+        message: 'Review and confirm this email before it is sent:',
+        summary: `Send mail "${subject}" to ${recipients || '(no recipients)'}`,
+        target: '',
+        method: 'POST',
+        path: '/me/sendmail',
+        body: payload,
+        confirmToken,
+      });
       if (gate) return gate;
       await client.write('POST', '/me/sendmail', payload);
       // sendmail returns 202 with an empty body; there is no id to report and
@@ -75,7 +81,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_draft',
     {
       description:
-        'Create a draft message in the Drafts folder without sending it. Requires confirm:true. Returns the created draft, which can be reviewed and sent from Outlook.',
+        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be reviewed and sent from Outlook.' +
+        CONFIRM_DESCRIPTION,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
         to: recipientList,
@@ -83,22 +90,26 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         subject: z.string().describe('Subject line'),
         body: z.string().describe('Message body'),
         html: z.boolean().optional().describe('Compose the body as HTML (default: plain text)'),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ to, cc, subject, body, html, confirm }) => {
+    async ({ to, cc, subject, body, html, confirmToken }, ctx) => {
       const payload = {
         ...messageBody(subject, body, html),
         ToRecipients: toRecipients(to),
         ...(cc?.length ? { CcRecipients: toRecipients(cc) } : {}),
       };
-      const gate = previewUnlessConfirmed(
-        confirm,
-        `Create draft "${subject}"`,
-        'POST',
-        '/me/messages',
-        payload,
-      );
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_create_draft',
+        action: 'mail.create_draft',
+        message: 'Review and confirm this draft:',
+        summary: `Create draft "${subject}"`,
+        target: '',
+        method: 'POST',
+        path: '/me/messages',
+        body: payload,
+        confirmToken,
+      });
       if (gate) return gate;
       const created = await client.write<{ Id?: string; WebLink?: string }>(
         'POST',
@@ -113,24 +124,29 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_mark_read',
     {
       description:
-        'Mark a message read or unread. Requires confirm:true. The result is verified by re-reading the message — a 2xx alone is not proof it persisted.',
+        'Mark a message read or unread. The result is verified by re-reading the message — a 2xx alone is not proof it persisted.' +
+        CONFIRM_DESCRIPTION,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         isRead: z.boolean().describe('true to mark read, false to mark unread'),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ id, isRead, confirm }) => {
+    async ({ id, isRead, confirmToken }, ctx) => {
       const path = `/me/messages/${encodeURIComponent(id)}`;
       const payload = { IsRead: isRead };
-      const gate = previewUnlessConfirmed(
-        confirm,
-        `Mark message ${id} as ${isRead ? 'read' : 'unread'}`,
-        'PATCH',
-        path,
-        payload,
-      );
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_mark_read',
+        action: 'mail.mark_read',
+        message: 'Review and confirm this change:',
+        summary: `Mark message ${id} as ${isRead ? 'read' : 'unread'}`,
+        target: id,
+        method: 'PATCH',
+        path: path,
+        body: payload,
+        confirmToken,
+      });
       if (gate) return gate;
       await client.write('PATCH', path, payload);
       // Re-read rather than trust the status. IsRead is the field the write
@@ -148,7 +164,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_move_message',
     {
       description:
-        'Move a message to another folder (e.g. "archive", "deleteditems", or a folder id from outlook_list_folders). Requires confirm:true. Moving assigns a NEW message id, which is returned.',
+        'Move a message to another folder (e.g. "archive", "deleteditems", or a folder id from outlook_list_folders). Moving assigns a NEW message id, which is returned.' +
+        CONFIRM_DESCRIPTION,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
@@ -156,19 +173,23 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           .string()
           .min(1)
           .describe('Destination folder id or well-known name (e.g. "archive")'),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ id, destination, confirm }) => {
+    async ({ id, destination, confirmToken }, ctx) => {
       const path = `/me/messages/${encodeURIComponent(id)}/move`;
       const payload = { DestinationId: destination };
-      const gate = previewUnlessConfirmed(
-        confirm,
-        `Move message ${id} to ${destination}`,
-        'POST',
-        path,
-        payload,
-      );
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_move_message',
+        action: 'mail.move',
+        message: 'Review and confirm this move:',
+        summary: `Move message ${id} to ${destination}`,
+        target: id,
+        method: 'POST',
+        path: path,
+        body: payload,
+        confirmToken,
+      });
       if (gate) return gate;
       const moved = await client.write<{ Id?: string; ParentFolderId?: string }>(
         'POST',
@@ -188,7 +209,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_event',
     {
       description:
-        'Create a calendar event. Requires confirm:true. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation.' +
+        'Create a calendar event. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation.' +
+        CONFIRM_DESCRIPTION +
         OUTBOUND_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
@@ -202,10 +224,10 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         location: z.string().optional().describe('Location display name'),
         body: z.string().optional().describe('Event description'),
         attendees: recipientList,
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ subject, start, end, timeZone, location, body, attendees, confirm }) => {
+    async ({ subject, start, end, timeZone, location, body, attendees, confirmToken }, ctx) => {
       // Falls back to UTC only when the mailbox itself declares no zone.
       const tz = timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
       const payload = {
@@ -223,13 +245,17 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
             }
           : {}),
       };
-      const gate = previewUnlessConfirmed(
-        confirm,
-        `Create event "${subject}" ${start} to ${end} (${tz})`,
-        'POST',
-        '/me/events',
-        payload,
-      );
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_create_event',
+        action: 'calendar.create_event',
+        message: 'Review and confirm this event (attendees are emailed an invitation):',
+        summary: `Create event "${subject}" ${start} to ${end} (${tz})`,
+        target: '',
+        method: 'POST',
+        path: '/me/events',
+        body: payload,
+        confirmToken,
+      });
       if (gate) return gate;
       const created = await client.write<{ Id?: string; WebLink?: string }>(
         'POST',

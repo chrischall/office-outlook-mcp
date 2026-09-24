@@ -97,23 +97,23 @@
     },
     {
       "name": "outlook_send_mail",
-      "description": "Send an email (requires confirm)"
+      "description": "Send an email (asks you to confirm first)"
     },
     {
       "name": "outlook_create_draft",
-      "description": "Create a draft without sending (requires confirm)"
+      "description": "Create a draft without sending (asks you to confirm first)"
     },
     {
       "name": "outlook_mark_read",
-      "description": "Mark a message read or unread (requires confirm)"
+      "description": "Mark a message read or unread (asks you to confirm first)"
     },
     {
       "name": "outlook_move_message",
-      "description": "Move a message to another folder (requires confirm)"
+      "description": "Move a message to another folder (asks you to confirm first)"
     },
     {
       "name": "outlook_create_event",
-      "description": "Create a calendar event (requires confirm)"
+      "description": "Create a calendar event (asks you to confirm first)"
     },
     {
       "name": "outlook_healthcheck",
