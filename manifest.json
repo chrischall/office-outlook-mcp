@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "office-outlook-mcp",
   "display_name": "Outlook (Microsoft 365)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
   "author": {
     "name": "Chris Chall",
