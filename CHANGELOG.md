@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.2.0...v0.3.0) (2026-09-24)
+
+
+### Features
+
+* confirm writes with a preview token instead of confirm: true ([#23](https://github.com/chrischall/office-outlook-mcp/issues/23)) ([9a083bb](https://github.com/chrischall/office-outlook-mcp/commit/9a083bbd9a72a09ab4fc781f7f9c95359aa4e96d))
+
+
+### Bug Fixes
+
+* **mail:** frame email and event text as untrusted before it reaches the model ([#21](https://github.com/chrischall/office-outlook-mcp/issues/21)) ([3ff90ef](https://github.com/chrischall/office-outlook-mcp/commit/3ff90efa904f49d86bfe3073aae7a04927f2b674))
+
 ## [0.2.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.1.5...v0.2.0) (2026-09-23)
 
 
