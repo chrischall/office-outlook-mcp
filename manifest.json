@@ -41,7 +41,7 @@
     "outlook_access_token": {
       "type": "string",
       "title": "Outlook Access Token (optional)",
-      "description": "A pre-obtained Outlook bearer token. Leave blank to capture one from your signed-in Outlook browser tab via the fetchproxy bridge.",
+      "description": "A pre-obtained Outlook bearer token. Leave blank to capture one from your signed-in Outlook browser tab via the ContextMint Bridge extension.",
       "required": false,
       "sensitive": true
     }

@@ -30,8 +30,9 @@ npm i -g @chrischall/office-outlook-mcp
 Requires the **ContextMint Bridge** browser extension, installed from
 [its releases](https://github.com/nullnet-app/contextmint-bridge/releases):
 in Chrome, unzip the chrome build and load it unpacked
-(`chrome://extensions` → Developer mode → Load unpacked); in Safari it ships
-inside the ContextMint app, which has no public download link yet.
+(`chrome://extensions` → Developer mode → Load unpacked). Safari is not
+available yet — it will ship inside the ContextMint app, which has no public
+download — so use Chrome for now.
 
 ContextMint Bridge is the fetchproxy browser extension under its new name, from
 the same maintainer — fetchproxy's own README
