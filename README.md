@@ -31,7 +31,20 @@ Requires the **ContextMint Bridge** browser extension, installed from
 [its releases](https://github.com/nullnet-app/contextmint-bridge/releases):
 in Chrome, unzip the chrome build and load it unpacked
 (`chrome://extensions` → Developer mode → Load unpacked); in Safari it ships
-inside the ContextMint app. Also install `@fetchproxy/cli`:
+inside the ContextMint app, which has no public download link yet.
+
+ContextMint Bridge is the fetchproxy browser extension under its new name, from
+the same maintainer — fetchproxy's own README
+([#extension](https://github.com/chrischall/fetchproxy#extension)) points to it.
+Its source is public at
+[nullnet-app/contextmint-bridge](https://github.com/nullnet-app/contextmint-bridge):
+build it yourself, or check a release zip against the `.sha256` file published
+beside it (`shasum -a 256 -c contextmint-bridge-chrome-<version>.zip.sha256`).
+
+The extension, `fpx` and this server are compatible by **fetchproxy protocol
+number** (currently protocol 4), not by matching package versions. Keep the
+bridge and `fpx` current — a mismatch fails with an error naming both protocol
+numbers. Also install `@fetchproxy/cli`:
 
 ```sh
 npm i -g @fetchproxy/cli

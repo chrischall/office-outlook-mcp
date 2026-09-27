@@ -27,9 +27,13 @@ the ContextMint Bridge extension popup; the grant then persists.
 
 Requires the **ContextMint Bridge** extension, from
 https://github.com/nullnet-app/contextmint-bridge/releases (Chrome: load the
-chrome zip unpacked; Safari: ships inside the ContextMint app). Keep the
-bridge and `fpx` current — a mismatch fails with an error naming both protocol
-numbers.
+chrome zip unpacked; Safari: ships inside the ContextMint app, which has no
+public download link yet). It is the fetchproxy extension under its new name,
+same maintainer, with public source — build it yourself or verify a release zip
+against its `.sha256` (`shasum -a 256 -c <zip>.sha256`). The extension and `fpx`
+are compatible by **fetchproxy protocol number** (currently protocol 4), not by
+matching package versions. Keep the bridge and `fpx` current — a mismatch fails
+with an error naming both protocol numbers.
 
 ## Use
 
