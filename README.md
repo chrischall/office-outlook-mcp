@@ -27,15 +27,18 @@ does not re-capture.
 npm i -g @chrischall/office-outlook-mcp
 ```
 
-Requires the **Transporter** Chrome extension and `@fetchproxy/cli`, on a
-matching major version:
+Requires the **ContextMint Bridge** browser extension, installed from
+[its releases](https://github.com/nullnet-app/contextmint-bridge/releases):
+in Chrome, unzip the chrome build and load it unpacked
+(`chrome://extensions` → Developer mode → Load unpacked); in Safari it ships
+inside the ContextMint app. Also install `@fetchproxy/cli`:
 
 ```sh
 npm i -g @fetchproxy/cli
 ```
 
-The first capture prints a 6-digit pair code to approve in the Transporter
-popup; the grant persists.
+The first capture prints a 6-digit pair code to approve in the ContextMint
+Bridge popup; the grant persists.
 
 ### Install in opencode
 
