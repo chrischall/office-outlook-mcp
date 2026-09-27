@@ -23,11 +23,13 @@ fpx profile declare outlook \
 
 Declare **all** scopes before the first pairing — widening them later forces the
 user to re-approve. The first `fpx` call prints a 6-digit pair code to approve in
-the Transporter extension popup; the grant then persists.
+the ContextMint Bridge extension popup; the grant then persists.
 
-Requires the **Transporter** Chrome extension, and the extension and CLI must be
-on the **same major version** — a 3.x extension against a 2.x CLI fails by
-binding the port and silently never connecting.
+Requires the **ContextMint Bridge** extension, from
+https://github.com/nullnet-app/contextmint-bridge/releases (Chrome: load the
+chrome zip unpacked; Safari: ships inside the ContextMint app). Keep the
+bridge and `fpx` current — a mismatch fails with an error naming both protocol
+numbers.
 
 ## Use
 

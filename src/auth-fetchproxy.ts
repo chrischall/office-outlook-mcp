@@ -35,7 +35,7 @@ import { PACKAGE_NAME, VERSION } from './version.js';
 /**
  * The fetchproxy concentrator port.
  *
- * ONE port for the whole fleet: the Transporter extension dials this port and
+ * ONE port for the whole fleet: the ContextMint Bridge extension dials this port and
  * servers host/peer-elect on it, so a "unique" per-MCP default would simply
  * never be found. `OUTLOOK_WS_PORT` overrides it for local development and —
  * the reason it exists — for a hosted bridged registration, where mcp-host
