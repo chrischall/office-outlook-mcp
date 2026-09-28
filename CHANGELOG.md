@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.1...v0.3.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 3 updates ([#28](https://github.com/chrischall/office-outlook-mcp/issues/28)) ([dc2bc1a](https://github.com/chrischall/office-outlook-mcp/commit/dc2bc1a5c002da383df5c91916700bea063a3fa7))
+* **deps:** move to [@fetchproxy](https://github.com/fetchproxy) 3.4 for ContextMint Bridge errors, capability subsets and managed pins ([#30](https://github.com/chrischall/office-outlook-mcp/issues/30)) ([aad986e](https://github.com/chrischall/office-outlook-mcp/commit/aad986e956681e4bddb3bf5d473506965bb8b052))
+* **deps:** move to @chrischall/mcp-utils 2.8 and [@fetchproxy](https://github.com/fetchproxy) 3.4.1 for clearer browser-bridge errors ([#33](https://github.com/chrischall/office-outlook-mcp/issues/33)) ([89a7513](https://github.com/chrischall/office-outlook-mcp/commit/89a751344ff8120ad8e2d9206c2d41caca0dbb36))
+
+
+### Documentation
+
+* say extension and fpx match by protocol number, and where ContextMint Bridge comes from ([#32](https://github.com/chrischall/office-outlook-mcp/issues/32)) ([cef6ffc](https://github.com/chrischall/office-outlook-mcp/commit/cef6ffc42108a6334c2dd74943cb82753636cef3))
+
 ## [0.3.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.0...v0.3.1) (2026-09-24)
 
 
