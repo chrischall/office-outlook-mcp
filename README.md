@@ -128,7 +128,9 @@ the one read a preview makes.)
 Mail and event text is written by other people, so `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_events` and `outlook_get_event` wrap every
 result (all views) in an untrusted-content envelope — `untrusted_content: true`
-plus a `note` telling the model to treat the text as data, never instructions.
+plus a `note` telling the model to treat the text as data, never instructions
+(a `view: raw` record that carries its own `untrusted_content`/`note` key is
+nested under `data`, so it cannot overwrite the envelope).
 On a client that cannot show a confirmation prompt, the confirmToken is still
 something the model passes back itself, so keep `MCP_CONFIRM_MODE=ask-user`
 (the default) and approve each preview in chat — or use a client that asks you

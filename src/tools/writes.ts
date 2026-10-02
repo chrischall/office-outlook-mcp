@@ -1,9 +1,13 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { minifiedResult } from '@chrischall/mcp-utils';
+import {
+  CONFIRM_FLOW_SENTENCE,
+  CONFIRM_INJECTION_RULE,
+  confirmTokenParam,
+  confirmWrite,
+  minifiedResult,
+} from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
-import { CONFIRM_DESCRIPTION, confirmTokenParam, confirmWrite } from './_confirm.js';
-import { OUTBOUND_DESCRIPTION_SUFFIX } from './_untrusted.js';
 import { mailboxTimeZone } from '../timezone.js';
 
 const recipientList = z
@@ -32,9 +36,10 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     {
       description:
         'Send an email from the signed-in mailbox.' +
-        CONFIRM_DESCRIPTION +
-        ' The preview shows exactly what would be sent.' +
-        OUTBOUND_DESCRIPTION_SUFFIX,
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' The preview shows exactly what would be sent. ' +
+        CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: z.object({
         to: recipientList,
@@ -63,10 +68,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         action: 'mail.send',
         message: 'Review and confirm this email before it is sent:',
         summary: `Send mail "${subject}" to ${recipients || '(no recipients)'}`,
-        target: '',
-        method: 'POST',
-        path: '/me/sendmail',
-        body: payload,
+        // One signed-in mailbox per server process.
+        account: undefined,
+        request: { method: 'POST', path: '/me/sendmail', body: payload },
         confirmToken,
       });
       if (gate) return gate;
@@ -82,7 +86,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     {
       description:
         'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be reviewed and sent from Outlook.' +
-        CONFIRM_DESCRIPTION,
+        ' ' +
+        CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
         to: recipientList,
@@ -104,10 +109,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         action: 'mail.create_draft',
         message: 'Review and confirm this draft:',
         summary: `Create draft "${subject}"`,
-        target: '',
-        method: 'POST',
-        path: '/me/messages',
-        body: payload,
+        // One signed-in mailbox per server process.
+        account: undefined,
+        request: { method: 'POST', path: '/me/messages', body: payload },
         confirmToken,
       });
       if (gate) return gate;
@@ -125,7 +129,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     {
       description:
         'Mark a message read or unread. The result is verified by re-reading the message — a 2xx alone is not proof it persisted.' +
-        CONFIRM_DESCRIPTION,
+        ' ' +
+        CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
@@ -141,10 +146,10 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         action: 'mail.mark_read',
         message: 'Review and confirm this change:',
         summary: `Mark message ${id} as ${isRead ? 'read' : 'unread'}`,
+        // One signed-in mailbox per server process.
+        account: undefined,
         target: id,
-        method: 'PATCH',
-        path: path,
-        body: payload,
+        request: { method: 'PATCH', path: path, body: payload },
         confirmToken,
       });
       if (gate) return gate;
@@ -165,7 +170,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     {
       description:
         'Move a message to another folder (e.g. "archive", "deleteditems", or a folder id from outlook_list_folders). Moving assigns a NEW message id, which is returned.' +
-        CONFIRM_DESCRIPTION,
+        ' ' +
+        CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
@@ -184,10 +190,10 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         action: 'mail.move',
         message: 'Review and confirm this move:',
         summary: `Move message ${id} to ${destination}`,
+        // One signed-in mailbox per server process.
+        account: undefined,
         target: id,
-        method: 'POST',
-        path: path,
-        body: payload,
+        request: { method: 'POST', path: path, body: payload },
         confirmToken,
       });
       if (gate) return gate;
@@ -210,8 +216,10 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     {
       description:
         'Create a calendar event. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation.' +
-        CONFIRM_DESCRIPTION +
-        OUTBOUND_DESCRIPTION_SUFFIX,
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' ' +
+        CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
         subject: z.string().describe('Event title'),
@@ -250,10 +258,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         action: 'calendar.create_event',
         message: 'Review and confirm this event (attendees are emailed an invitation):',
         summary: `Create event "${subject}" ${start} to ${end} (${tz})`,
-        target: '',
-        method: 'POST',
-        path: '/me/events',
-        body: payload,
+        // One signed-in mailbox per server process.
+        account: undefined,
+        request: { method: 'POST', path: '/me/events', body: payload },
         confirmToken,
       });
       if (gate) return gate;
