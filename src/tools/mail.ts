@@ -11,7 +11,7 @@ import {
   type OutlookMessage,
 } from '../view.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
-import { untrustedResult, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
+import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
 export const VIEWS = ['compact', 'full', 'raw'] as const;
 
@@ -78,7 +78,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     {
       description:
         "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless." +
-        UNTRUSTED_DESCRIPTION_SUFFIX,
+        ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
@@ -124,8 +124,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         `${base}${qs(params)}`,
       );
       const v = resolveView(view, VIEWS);
-      if (v === 'raw') return untrustedResult(data);
-      return untrustedResult(
+      if (v === 'raw') return mailboxUntrusted(data);
+      return mailboxUntrusted(
         projectCollection(data, v === 'full' ? fullMessage : compactMessage, 'message'),
       );
     },
@@ -136,7 +136,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     {
       description:
         'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); pass view:"raw" to get Outlook\'s untouched record.' +
-        UNTRUSTED_DESCRIPTION_SUFFIX,
+        ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
@@ -152,8 +152,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         text: html !== true,
       });
       const v = resolveView(view, VIEWS);
-      if (v === 'raw') return untrustedResult(data as Record<string, unknown>);
-      return untrustedResult(v === 'full' ? fullMessage(data) : compactMessage(data));
+      if (v === 'raw') return mailboxUntrusted(data);
+      return mailboxUntrusted(v === 'full' ? fullMessage(data) : compactMessage(data));
     },
   );
 
