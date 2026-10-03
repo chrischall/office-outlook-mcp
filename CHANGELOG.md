@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.3](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.2...v0.3.3) (2026-10-03)
+
+
+### Bug Fixes
+
+* **deps:** adopt @chrischall/mcp-utils 2.12.0 untrusted framing and confirmWrite ([#39](https://github.com/chrischall/office-outlook-mcp/issues/39)) ([2573c5b](https://github.com/chrischall/office-outlook-mcp/commit/2573c5ba33ad4920e5417a21015385c990e618ae))
+* **deps:** bump @chrischall/mcp-utils to 2.13.0 ([#40](https://github.com/chrischall/office-outlook-mcp/issues/40)) ([3bc7c4f](https://github.com/chrischall/office-outlook-mcp/commit/3bc7c4fb3cbe4cdef414a662b58df1959ff15c1a))
+* keep credentials and report edge_blocked on CDN/WAF blocks (mcp-utils 2.10.0) ([#37](https://github.com/chrischall/office-outlook-mcp/issues/37)) ([6b15420](https://github.com/chrischall/office-outlook-mcp/commit/6b1542035baf6f88cb51cc460b582709cab83a97))
+* keep write approvals valid across a hosted restart (mcp-utils 2.11.0) ([#38](https://github.com/chrischall/office-outlook-mcp/issues/38)) ([4165d51](https://github.com/chrischall/office-outlook-mcp/commit/4165d511feb0c2ac3e1db28427a07e09f34cd2f3))
+* report CDN/WAF blocks as edge_blocked, not a rejected credential (mcp-utils 2.9.0) ([#34](https://github.com/chrischall/office-outlook-mcp/issues/34)) ([7464170](https://github.com/chrischall/office-outlook-mcp/commit/7464170580c8a326cd298b1d2566126ab1a8d5a1))
+
 ## [0.3.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.1...v0.3.2) (2026-09-27)
 
 
