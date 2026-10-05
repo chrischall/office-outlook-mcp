@@ -11,4 +11,4 @@
  */
 export const PACKAGE_NAME = 'office-outlook-mcp';
 
-export const VERSION = '0.3.3'; // x-release-please-version
+export const VERSION = '0.3.4'; // x-release-please-version

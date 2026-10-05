@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.3...v0.3.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 2 updates ([#43](https://github.com/chrischall/office-outlook-mcp/issues/43)) ([a964fae](https://github.com/chrischall/office-outlook-mcp/commit/a964fae7b441f0231bd04008bcb389d1c6b6b5b6))
+* **deps:** require @chrischall/mcp-utils 2.14.0 and MCP SDK 2.3.0 ([#45](https://github.com/chrischall/office-outlook-mcp/issues/45)) ([0b0d89c](https://github.com/chrischall/office-outlook-mcp/commit/0b0d89c4ed51c4587e44ed58e47d7c1e75bf0c03))
+
 ## [0.3.3](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.2...v0.3.3) (2026-10-03)
 
 
