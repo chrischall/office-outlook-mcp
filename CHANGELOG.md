@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.5](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.4...v0.3.5) (2026-10-07)
+
+
+### Bug Fixes
+
+* **deps:** bump mcp-utils to 2.15.0 and fetchproxy to 3.6.0 for elicitation opt-out and relay frame fixes ([#46](https://github.com/chrischall/office-outlook-mcp/issues/46)) ([54a350e](https://github.com/chrischall/office-outlook-mcp/commit/54a350e3f317791b5e3c98e6b837cd9a63a52c57))
+* **deps:** bump source-map-js from 1.2.1 to 1.2.2 in the security group across 1 directory ([#48](https://github.com/chrischall/office-outlook-mcp/issues/48)) ([dd5fe7a](https://github.com/chrischall/office-outlook-mcp/commit/dd5fe7acaf00ff93d7074544af63c0cf5c4f8709))
+
+
+### Documentation
+
+* document MCP_CONFIRM_ELICITATION ([#49](https://github.com/chrischall/office-outlook-mcp/issues/49)) ([58f9e9a](https://github.com/chrischall/office-outlook-mcp/commit/58f9e9a6458de31768b4fcbab61fffcfdc7503d5))
+
 ## [0.3.4](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.3...v0.3.4) (2026-10-05)
 
 
