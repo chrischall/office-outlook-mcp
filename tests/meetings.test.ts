@@ -228,6 +228,47 @@ describe('outlook_update_event', () => {
     await h.close();
   });
 
+  it('verifies an end given with an offset in the zone it was written in', async () => {
+    // Review of #50: the re-read used only Start's zone, so a UTC `end` was
+    // compared against a mailbox-zone read and reported "End did not change".
+    const { client, calls } = stub(baseEvent());
+    const h = await harness(client);
+    const res = parseToolResult<Ev>(
+      await confirmed(h, 'outlook_update_event', { id: 'e1', end: '2026-10-12T15:00:00Z' }),
+    );
+    expect(writes(calls)[0].body).toMatchObject({
+      End: { DateTime: '2026-10-12T15:00:00', TimeZone: 'UTC' },
+    });
+    expect(res).not.toHaveProperty('warning');
+    expect(res.updated).toBe(true);
+    const lastRead = calls.filter((c) => c.path.startsWith('/me/events/e1')).at(-1);
+    expect(lastRead?.prefer).toBe('outlook.timezone="UTC"');
+    await h.close();
+  });
+
+  it('refuses a start and end given in different zones rather than skip the order check', async () => {
+    const { client, calls } = stub(baseEvent());
+    const h = await harness(client);
+    const res = await h.callTool('outlook_update_event', {
+      id: 'e1',
+      start: '2026-10-12T15:00:00',
+      end: '2026-10-12T15:30:00Z',
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/same way/);
+    expect(writes(calls)).toHaveLength(0);
+    await h.close();
+  });
+
+  it('refuses a new end before the current start', async () => {
+    const { client, calls } = stub(baseEvent());
+    const h = await harness(client);
+    const res = await h.callTool('outlook_update_event', { id: 'e1', end: '2026-10-12T09:00:00' });
+    expect(res.isError).toBe(true);
+    expect(writes(calls)).toHaveLength(0);
+    await h.close();
+  });
+
   it('verifies by re-reading and warns when a change did not stick', async () => {
     const { client } = stub(baseEvent(), { persist: false });
     const h = await harness(client);
@@ -243,5 +284,14 @@ describe('event views', () => {
   it('shows the Teams join link, not the legacy empty OnlineMeetingUrl', () => {
     const v = fullEvent({ ...baseEvent(), OnlineMeetingUrl: '', OnlineMeeting: { JoinUrl: JOIN } } as never);
     expect(v.JoinUrl).toBe(JOIN);
+  });
+
+  it('keeps the legacy OnlineMeetingUrl field when Outlook fills it', () => {
+    // Review of #50: renaming the field removed it from the output. Keep it
+    // beside JoinUrl so nothing a consumer read disappears.
+    const legacy = 'https://meet.lync.com/x';
+    const v = fullEvent({ ...baseEvent(), OnlineMeetingUrl: legacy } as never);
+    expect(v.OnlineMeetingUrl).toBe(legacy);
+    expect(v.JoinUrl).toBe(legacy);
   });
 });
