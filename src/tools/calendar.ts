@@ -14,7 +14,7 @@ import { VIEWS } from './mail.js';
 import { mailboxTimeZone } from '../timezone.js';
 
 const EVENT_SELECT =
-  'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,BodyPreview';
+  'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,OnlineMeeting,BodyPreview';
 
 function qs(params: Record<string, string | number | undefined>): string {
   const parts: string[] = [];

@@ -164,8 +164,8 @@ invalid body and receiving **400**, not 401/403/404:
 | `POST /me/events` | `UnableToDeserializePostBody` |
 | `POST /me/contacts` | `UnableToDeserializePostBody` |
 
-**No write was executed during the build** — no mail was sent and nothing in
-the mailbox was mutated. The payload shapes the client sends are therefore
+**No mail write was executed during the build** — no mail was sent and no
+message was mutated (calendar exceptions below). The payload shapes the client sends are therefore
 *shapes*, not round-tripped captures, and every mutating tool asks for
 confirmation first — a prompt where the client supports one, otherwise a
 preview plus a single-use confirmToken (`MCP_CONFIRM_MODE`).
@@ -176,6 +176,28 @@ warning when the value did not move.
 
 Note `POST /me/messages/{id}/move` assigns the message a **new `Id`**; the old
 one stops resolving.
+
+### Teams meetings (executed live 2026-10-08)
+
+Unlike the routes above, these were **round-tripped**, on two test events with
+no attendees (so no invitations went out), and both were deleted afterwards:
+
+- `POST /me/events` with `"IsOnlineMeeting": true, "OnlineMeetingProvider":
+  "TeamsForBusiness"` returns the created event with `OnlineMeeting.JoinUrl`
+  already populated, and Outlook sets `Location` to "Microsoft Teams Meeting".
+- `PATCH /me/events/{id}` with the same two fields adds a Teams meeting to an
+  existing event. The re-read shows the join link.
+- `PATCH` with `Subject` and `Start`/`End` (as `DateTimeTimeZone`) persisted
+  as sent.
+- `DELETE /me/events/{id}` removed the event.
+
+The Teams link is at **`OnlineMeeting.JoinUrl`**. The older `OnlineMeetingUrl`
+is `""` on every Teams meeting read (73 of 73 over two weeks). An event with
+no online meeting has `OnlineMeeting: {}`, `IsOnlineMeeting: false` and
+`OnlineMeetingProvider: "Unknown"`. `$select=OnlineMeeting` works.
+
+`IsOrganizer: false` marks a meeting someone else organizes. An attendee's
+PATCH would change only their own copy, so `outlook_update_event` refuses it.
 
 ---
 

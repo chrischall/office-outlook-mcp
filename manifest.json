@@ -121,7 +121,11 @@
     },
     {
       "name": "outlook_create_event",
-      "description": "Create a calendar event (asks you to confirm first)"
+      "description": "Create a calendar event or Teams meeting (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_update_event",
+      "description": "Update a meeting you organize, adding Teams if missing (asks you to confirm first)"
     },
     {
       "name": "outlook_healthcheck",
