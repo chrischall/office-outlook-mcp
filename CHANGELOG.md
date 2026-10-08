@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.5...v0.4.0) (2026-10-08)
+
+
+### Features
+
+* **calendar:** find meeting times, and create and update Teams meetings ([#50](https://github.com/chrischall/office-outlook-mcp/issues/50)) ([6a233ee](https://github.com/chrischall/office-outlook-mcp/commit/6a233eef9cb0c97a4ea0603c3d7f41c1842defe6))
+
+
+### Bug Fixes
+
+* **calendar:** verify offset end times correctly when updating a meeting ([#53](https://github.com/chrischall/office-outlook-mcp/issues/53)) ([988d24a](https://github.com/chrischall/office-outlook-mcp/commit/988d24afed1fdf7979f5eb389861b0dfecf934e6))
+
 ## [0.3.5](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.4...v0.3.5) (2026-10-07)
 
 
