@@ -421,13 +421,32 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           const length = naiveMs(current.End.DateTime) - naiveMs(current.Start.DateTime);
           end = { DateTime: fromNaiveMs(naiveMs(start.DateTime) + length), TimeZone: start.TimeZone };
         }
-        if (start) payload.Start = start;
-        if (end) payload.End = end;
-        if (start && end && naiveMs(end.DateTime) <= naiveMs(start.DateTime) && start.TimeZone === end.TimeZone) {
+        // A wall-clock time and one with an offset cannot be ordered without
+        // the Windows zone's rules, which we do not have. Refuse rather than
+        // skip the order check and write a meeting that ends before it starts.
+        if (args.start !== undefined && args.end !== undefined && start?.TimeZone !== end?.TimeZone) {
+          throw new McpToolError('`start` and `end` are in different zones.', {
+            hint: 'Give both the same way: both local wall-clock times, or both with Z or an offset.',
+          });
+        }
+        // Order check against the start the meeting will have. When only `end`
+        // moves that is the current start, read in the end's zone.
+        const startIn =
+          start ??
+          (end && end.TimeZone !== tz
+            ? (await readEvent(end.TimeZone))?.Start
+            : current?.Start);
+        if (
+          end &&
+          startIn?.DateTime &&
+          naiveMs(end.DateTime) <= naiveMs(startIn.DateTime)
+        ) {
           throw new McpToolError('The meeting would end before it starts.', {
             hint: '`end` must be later than `start`.',
           });
         }
+        if (start) payload.Start = start;
+        if (end) payload.End = end;
       }
 
       const adding = [
@@ -472,7 +491,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
 
       // Re-read rather than trust the status, in the zone the write used so
       // the times compare like for like.
-      const writtenZone = (payload.Start as { TimeZone?: string } | undefined)?.TimeZone ?? tz;
+      // Start and End share a zone (enforced above), but either may be alone.
+      const writtenZone =
+        ((payload.Start ?? payload.End) as { TimeZone?: string } | undefined)?.TimeZone ?? tz;
       const after = await readEvent(writtenZone);
       const unchanged: string[] = [];
       if (payload.Subject !== undefined && after?.Subject !== payload.Subject) unchanged.push('Subject');

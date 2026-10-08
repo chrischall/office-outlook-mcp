@@ -124,6 +124,8 @@ export function fullEvent(e: OutlookEvent): Record<string, unknown> {
     // The Teams link lives under OnlineMeeting; OnlineMeetingUrl is empty on
     // every live Teams meeting checked.
     JoinUrl: e.OnlineMeeting?.JoinUrl || e.OnlineMeetingUrl || undefined,
+    // Kept beside JoinUrl so a consumer of the old field still finds it.
+    OnlineMeetingUrl: e.OnlineMeetingUrl || undefined,
     Preview: e.BodyPreview?.trim() || undefined,
     WebLink: e.WebLink,
   });
