@@ -95,6 +95,63 @@ Multiple values combine in one comma-separated header; confirmed working.
 
 ---
 
+## Scheduling assistant (read-only POSTs)
+
+Verified live **2026-10-08**, both **200**. They are POSTs but change
+nothing, so the client sends them through `post`, not `write`.
+
+### `POST /me/findmeetingtimes`
+
+```json
+{
+  "Attendees": [{ "Type": "Required", "EmailAddress": { "Address": "a@x" } }],
+  "TimeConstraint": {
+    "ActivityDomain": "Work",
+    "Timeslots": [{
+      "Start": { "DateTime": "2026-10-12T09:00:00", "TimeZone": "Eastern Standard Time" },
+      "End":   { "DateTime": "2026-10-13T17:00:00", "TimeZone": "Eastern Standard Time" }
+    }]
+  },
+  "MeetingDuration": "PT45M",
+  "MaxCandidates": 3,
+  "ReturnSuggestionReasons": true
+}
+```
+
+Returns `EmptySuggestionsReason` plus `MeetingTimeSuggestions[]`, each with
+`Confidence`, `OrganizerAvailability`, `SuggestionReason`,
+`MeetingTimeSlot.{Start,End}` and `AttendeeAvailability[]`
+(`{Availability, Attendee.EmailAddress.Address}`).
+
+- **Slots come back in UTC** regardless of the request's `TimeZone` unless
+  `Prefer: outlook.timezone="…"` is sent. With it they are in that zone.
+- Listing the signed-in user as an attendee returns an **empty**
+  `AttendeeAvailability`: they are the organizer, and appear only as
+  `OrganizerAvailability`.
+- `PT30M` and `PT45M` both accepted.
+
+### `POST /me/calendar/getschedule`
+
+```json
+{
+  "Schedules": ["a@x"],
+  "StartTime": { "DateTime": "2026-10-12T09:00:00", "TimeZone": "Eastern Standard Time" },
+  "EndTime":   { "DateTime": "2026-10-12T17:00:00", "TimeZone": "Eastern Standard Time" },
+  "AvailabilityViewInterval": 30
+}
+```
+
+Returns `value[]` of `{ScheduleId, AvailabilityView, ScheduleItems[]}`, with
+items carrying `Status, Subject, Location, IsMeeting, IsRecurring, IsPrivate,
+Start, End`. `AvailabilityView` is one digit per interval (`0` free,
+`2` busy). The same `Prefer` timezone rule applies.
+
+An address that does not resolve still returns 200, as an entry with
+`Error: {Message: "MailRecipientNotFoundException…", ResponseCode: "5009"}`
+and no items. That must not be reported as "free".
+
+---
+
 ## Writes
 
 Each route was confirmed to exist and be authorised by POSTing a deliberately

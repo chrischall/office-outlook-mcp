@@ -108,7 +108,8 @@ Everything is optional — with nothing set, the server captures from the browse
 
 **Read** — `outlook_list_folders`, `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_attachments`, `outlook_list_events`,
-`outlook_get_event`, `outlook_list_calendars`, `outlook_get_profile`,
+`outlook_get_event`, `outlook_list_calendars`, `outlook_find_meeting_times`,
+`outlook_get_schedule`, `outlook_get_profile`,
 `outlook_get_mailbox_settings`, `outlook_list_contacts`, `outlook_list_people`,
 `outlook_list_tasks`
 

@@ -266,6 +266,20 @@ export class OutlookClient {
   }
 
   /**
+   * POST a read-only query — `findmeetingtimes`, `getschedule` — that changes
+   * nothing in the mailbox. Kept apart from `write` so a reader can tell the
+   * two apart at the call site, and because these take `Prefer` (notably
+   * `outlook.timezone`, without which every returned slot is UTC).
+   */
+  async post<T>(path: string, body: unknown, opts: { prefer?: string } = {}): Promise<T> {
+    this.#requireConfigured();
+    return this.#client().fetchJson<T>('POST', path, {
+      body,
+      headers: opts.prefer ? { Prefer: opts.prefer } : undefined,
+    });
+  }
+
+  /**
    * The single write path. Everything mutating goes through here so auth and
    * error shaping stay in one place.
    */
