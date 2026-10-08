@@ -5,6 +5,7 @@ import {
   CONFIRM_INJECTION_RULE,
   confirmTokenParam,
   confirmWrite,
+  McpToolError,
   minifiedResult,
 } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
@@ -29,6 +30,72 @@ function messageBody(subject: string, body: string, html: boolean | undefined) {
     Body: { ContentType: html === true ? 'HTML' : 'Text', Content: body },
   };
 }
+
+/**
+ * What makes an event a Teams meeting. Field names verified on live events
+ * 2026-10-08; the join link then appears at `OnlineMeeting.JoinUrl`.
+ */
+const TEAMS = { IsOnlineMeeting: true, OnlineMeetingProvider: 'TeamsForBusiness' } as const;
+
+const teamsMeetingParam = z
+  .boolean()
+  .optional()
+  .describe('Attach a Microsoft Teams meeting (default true). false leaves it off.');
+
+interface Attendee {
+  Type?: string;
+  EmailAddress?: { Address?: string; Name?: string };
+}
+
+interface StoredEvent {
+  Id?: string;
+  Subject?: string;
+  IsOrganizer?: boolean;
+  Start?: { DateTime?: string; TimeZone?: string };
+  End?: { DateTime?: string; TimeZone?: string };
+  Location?: { DisplayName?: string };
+  Attendees?: (Attendee & { Status?: unknown })[];
+  IsOnlineMeeting?: boolean;
+  OnlineMeetingProvider?: string;
+  OnlineMeeting?: { JoinUrl?: string } | null;
+}
+
+const EVENT_STATE_SELECT =
+  'Id,Subject,IsOrganizer,Start,End,Location,Attendees,IsOnlineMeeting,OnlineMeetingProvider,OnlineMeeting';
+
+function attendee(Address: string, Type: 'Required' | 'Optional'): Attendee {
+  return { Type, EmailAddress: { Address } };
+}
+
+const lower = (a: Attendee) => a.EmailAddress?.Address?.toLowerCase();
+
+function joinUrlOf(e: StoredEvent | undefined): string | undefined {
+  return e?.OnlineMeeting?.JoinUrl || undefined;
+}
+
+function isTeams(e: StoredEvent): boolean {
+  return e.IsOnlineMeeting === true && e.OnlineMeetingProvider === 'TeamsForBusiness';
+}
+
+/**
+ * A `DateTimeTimeZone` for a caller-supplied time: wall-clock is read in
+ * `zone`; a value with `Z` or an offset already names its instant and goes to
+ * UTC rather than having the offset ignored.
+ */
+function dateTimeTimeZone(value: string, zone: string): { DateTime: string; TimeZone: string } {
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) {
+      return { DateTime: d.toISOString().replace(/\.\d{3}Z$/, ''), TimeZone: 'UTC' };
+    }
+  }
+  return { DateTime: value, TimeZone: zone };
+}
+
+/** Wall-clock arithmetic: both sides are naive times in one zone. */
+const naiveMs = (dt: string) => Date.parse(`${dt.replace(/\.\d+$/, '')}Z`);
+const fromNaiveMs = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, '');
+const trimTime = (dt: string | undefined) => dt?.replace(/\.\d+$/, '');
 
 export function registerWriteTools(server: McpServer, client: OutlookClient): void {
   server.registerTool(
@@ -215,7 +282,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_event',
     {
       description:
-        'Create a calendar event. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation.' +
+        'Create a calendar event or meeting. A Microsoft Teams meeting is attached by default (`teamsMeeting: false` to skip) and its join link is returned. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation. To pick a time first, use outlook_find_meeting_times.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' ' +
@@ -231,11 +298,21 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           .describe('Windows time-zone name. Defaults to the MAILBOX time zone.'),
         location: z.string().optional().describe('Location display name'),
         body: z.string().optional().describe('Event description'),
-        attendees: recipientList,
+        attendees: recipientList.describe('Required attendees\' email addresses'),
+        optionalAttendees: recipientList.describe('Optional attendees\' email addresses'),
+        teamsMeeting: teamsMeetingParam,
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ subject, start, end, timeZone, location, body, attendees, confirmToken }, ctx) => {
+    async (
+      { subject, start, end, timeZone, location, body, attendees, optionalAttendees, teamsMeeting, confirmToken },
+      ctx,
+    ) => {
+      const wantTeams = teamsMeeting !== false;
+      const allAttendees = [
+        ...(attendees ?? []).map((a) => attendee(a, 'Required')),
+        ...(optionalAttendees ?? []).map((a) => attendee(a, 'Optional')),
+      ];
       // Falls back to UTC only when the mailbox itself declares no zone.
       const tz = timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
       const payload = {
@@ -244,32 +321,185 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         End: { DateTime: end, TimeZone: tz },
         ...(location ? { Location: { DisplayName: location } } : {}),
         ...(body ? { Body: { ContentType: 'Text', Content: body } } : {}),
-        ...(attendees?.length
-          ? {
-              Attendees: attendees.map((Address) => ({
-                EmailAddress: { Address },
-                Type: 'Required',
-              })),
-            }
-          : {}),
+        ...(allAttendees.length ? { Attendees: allAttendees } : {}),
+        ...(wantTeams ? TEAMS : {}),
       };
       const gate = await confirmWrite(ctx, {
         tool: 'outlook_create_event',
         action: 'calendar.create_event',
         message: 'Review and confirm this event (attendees are emailed an invitation):',
-        summary: `Create event "${subject}" ${start} to ${end} (${tz})`,
+        summary: `Create ${wantTeams ? 'Teams meeting' : 'event'} "${subject}" ${start} to ${end} (${tz})`,
         // One signed-in mailbox per server process.
         account: undefined,
         request: { method: 'POST', path: '/me/events', body: payload },
         confirmToken,
       });
       if (gate) return gate;
-      const created = await client.write<{ Id?: string; WebLink?: string }>(
+      const created = await client.write<StoredEvent & { WebLink?: string }>(
         'POST',
         '/me/events',
         payload,
       );
-      return minifiedResult({ created: true, Id: created?.Id, WebLink: created?.WebLink });
+      let joinUrl = joinUrlOf(created);
+      // A 201 is not proof the Teams meeting was provisioned — the link is.
+      // Re-read once in case it was filled in after the create returned.
+      if (wantTeams && !joinUrl && created?.Id) {
+        const after = await client.get<StoredEvent>(
+          `/me/events/${encodeURIComponent(created.Id)}?$select=OnlineMeeting`,
+        );
+        joinUrl = joinUrlOf(after);
+      }
+      return minifiedResult({
+        created: true,
+        Id: created?.Id,
+        WebLink: created?.WebLink,
+        ...(joinUrl ? { JoinUrl: joinUrl } : {}),
+        ...(wantTeams && !joinUrl
+          ? { warning: 'The event was created, but Outlook returned no Teams join link.' }
+          : {}),
+      });
+    },
+  );
+
+  server.registerTool(
+    'outlook_update_event',
+    {
+      description:
+        'Update a meeting you organize: retitle, move, relocate, edit the description, or add/remove attendees. Moving only `start` keeps the meeting\'s length. A Microsoft Teams meeting is added if the event lacks one (`teamsMeeting: false` to skip). Attendees are sent an updated invitation. Only the organizer can update a meeting — an attendee\'s edit would change their own copy alone, so it is refused. The result is verified by re-reading the event.' +
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' ' +
+        CONFIRM_INJECTION_RULE,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Event Id from outlook_list_events or outlook_get_event'),
+        subject: z.string().optional().describe('New title'),
+        start: z.string().optional().describe('New start, ISO 8601 local time e.g. 2026-09-22T15:00:00'),
+        end: z
+          .string()
+          .optional()
+          .describe('New end. Omit when moving `start` to keep the current length.'),
+        timeZone: z
+          .string()
+          .optional()
+          .describe('Windows time-zone name for start/end. Defaults to the MAILBOX time zone.'),
+        location: z.string().optional().describe('New location display name'),
+        body: z.string().optional().describe('New description (replaces the existing one)'),
+        addAttendees: recipientList.describe('Required attendees to add'),
+        addOptionalAttendees: recipientList.describe('Optional attendees to add'),
+        removeAttendees: recipientList.describe('Attendees to remove'),
+        teamsMeeting: teamsMeetingParam,
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async (args, ctx) => {
+      const tz = args.timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
+      const path = `/me/events/${encodeURIComponent(args.id)}`;
+      const readEvent = (zone: string) =>
+        client.get<StoredEvent>(`${path}?$select=${EVENT_STATE_SELECT}`, {
+          prefer: `outlook.timezone="${zone}"`,
+        });
+      const current = await readEvent(tz);
+      if (current?.IsOrganizer === false) {
+        throw new McpToolError('Only the organizer can update this meeting.', {
+          hint:
+            "You are an attendee. Changing your copy would not reach the organizer or anyone else; ask the organizer, or propose a new time from Outlook.",
+        });
+      }
+
+      const payload: Record<string, unknown> = {};
+      if (args.subject !== undefined) payload.Subject = args.subject;
+      if (args.location !== undefined) payload.Location = { DisplayName: args.location };
+      if (args.body !== undefined) payload.Body = { ContentType: 'Text', Content: args.body };
+
+      if (args.start !== undefined || args.end !== undefined) {
+        const start = args.start !== undefined ? dateTimeTimeZone(args.start, tz) : undefined;
+        let end = args.end !== undefined ? dateTimeTimeZone(args.end, tz) : undefined;
+        // Moving the start alone keeps the length. The current times were read
+        // in `tz`, so convert the duration onto whatever zone the new start uses.
+        if (start && !end && current?.Start?.DateTime && current?.End?.DateTime) {
+          const length = naiveMs(current.End.DateTime) - naiveMs(current.Start.DateTime);
+          end = { DateTime: fromNaiveMs(naiveMs(start.DateTime) + length), TimeZone: start.TimeZone };
+        }
+        if (start) payload.Start = start;
+        if (end) payload.End = end;
+        if (start && end && naiveMs(end.DateTime) <= naiveMs(start.DateTime) && start.TimeZone === end.TimeZone) {
+          throw new McpToolError('The meeting would end before it starts.', {
+            hint: '`end` must be later than `start`.',
+          });
+        }
+      }
+
+      const adding = [
+        ...(args.addAttendees ?? []).map((a) => attendee(a, 'Required')),
+        ...(args.addOptionalAttendees ?? []).map((a) => attendee(a, 'Optional')),
+      ];
+      const removing = new Set((args.removeAttendees ?? []).map((a) => a.toLowerCase()));
+      if (adding.length || removing.size) {
+        // PATCH replaces the whole list, so build it from the current one.
+        const next: Attendee[] = (current?.Attendees ?? [])
+          .filter((a) => !removing.has(lower(a) ?? ''))
+          .map(({ Type, EmailAddress }) => ({ Type, EmailAddress }));
+        for (const a of adding) {
+          if (!next.some((n) => lower(n) === lower(a))) next.push(a);
+        }
+        payload.Attendees = next;
+      }
+
+      const addTeams = args.teamsMeeting !== false && !(current && isTeams(current));
+      if (addTeams) Object.assign(payload, TEAMS);
+
+      if (Object.keys(payload).length === 0) {
+        throw new McpToolError('Nothing to update.', {
+          hint: 'Pass at least one of subject, start, end, location, body, or attendee changes.',
+        });
+      }
+
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_update_event',
+        action: 'calendar.update_event',
+        message: 'Review and confirm this change (attendees are sent an updated invitation):',
+        summary: `Update "${current?.Subject ?? args.id}": ${Object.keys(payload).join(', ')}`,
+        // One signed-in mailbox per server process.
+        account: undefined,
+        target: args.id,
+        request: { method: 'PATCH', path, body: payload },
+        confirmToken: args.confirmToken,
+      });
+      if (gate) return gate;
+
+      await client.write('PATCH', path, payload);
+
+      // Re-read rather than trust the status, in the zone the write used so
+      // the times compare like for like.
+      const writtenZone = (payload.Start as { TimeZone?: string } | undefined)?.TimeZone ?? tz;
+      const after = await readEvent(writtenZone);
+      const unchanged: string[] = [];
+      if (payload.Subject !== undefined && after?.Subject !== payload.Subject) unchanged.push('Subject');
+      for (const key of ['Start', 'End'] as const) {
+        const want = payload[key] as { DateTime: string } | undefined;
+        if (want && trimTime(after?.[key]?.DateTime) !== trimTime(want.DateTime)) unchanged.push(key);
+      }
+      if (payload.Location !== undefined && after?.Location?.DisplayName !== args.location) {
+        unchanged.push('Location');
+      }
+      if (payload.Attendees !== undefined) {
+        const want = (payload.Attendees as Attendee[]).map(lower).sort().join();
+        const got = (after?.Attendees ?? []).map(lower).sort().join();
+        if (want !== got) unchanged.push('Attendees');
+      }
+      const joinUrl = joinUrlOf(after);
+      if (addTeams && !joinUrl) unchanged.push('Teams meeting');
+
+      return minifiedResult({
+        updated: unchanged.length === 0,
+        Id: after?.Id ?? args.id,
+        changed: Object.keys(payload),
+        ...(joinUrl ? { JoinUrl: joinUrl } : {}),
+        ...(unchanged.length
+          ? { warning: `Outlook accepted the update but these did not change: ${unchanged.join(', ')}.` }
+          : {}),
+      });
     },
   );
 }

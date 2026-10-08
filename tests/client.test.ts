@@ -118,6 +118,26 @@ describe('requests', () => {
     );
   });
 
+  it('POSTs a read-only query with a JSON body and Prefer header', async () => {
+    // findmeetingtimes and getschedule are POSTs that change nothing; they
+    // still need `outlook.timezone`, or every suggested slot comes back in UTC
+    // (live 2026-10-08).
+    const fetchImpl = vi.fn(async () => jsonResponse({ MeetingTimeSuggestions: [] }));
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await c.post('/me/findmeetingtimes', { MaxCandidates: 1 }, {
+      prefer: 'outlook.timezone="Eastern Standard Time"',
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toBe(`${DEFAULT_API_BASE}/me/findmeetingtimes`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ MaxCandidates: 1 });
+    expect(preferOf(fetchImpl, 0)).toBe('outlook.timezone="Eastern Standard Time"');
+  });
+
   it('refuses to follow a pagination link off the API origin', async () => {
     const c = new OutlookClient({
       env: env(),

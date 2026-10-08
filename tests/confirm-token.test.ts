@@ -73,6 +73,7 @@ const gated = [
     'POST',
     '/me/events',
   ],
+  ['outlook_update_event', { id: 'e1', subject: 's' }, 'PATCH', '/me/events/e1'],
 ] as const;
 
 describe('every write tool is gated by a confirm token', () => {
@@ -102,7 +103,7 @@ describe('every write tool is gated by a confirm token', () => {
     const { client } = stubClient();
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const { tools } = await h.client.listTools();
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
     for (const tool of tools) {
       const props = tool.inputSchema.properties ?? {};
       expect(props).toHaveProperty('confirmToken');

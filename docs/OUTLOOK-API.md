@@ -95,6 +95,63 @@ Multiple values combine in one comma-separated header; confirmed working.
 
 ---
 
+## Scheduling assistant (read-only POSTs)
+
+Verified live **2026-10-08**, both **200**. They are POSTs but change
+nothing, so the client sends them through `post`, not `write`.
+
+### `POST /me/findmeetingtimes`
+
+```json
+{
+  "Attendees": [{ "Type": "Required", "EmailAddress": { "Address": "a@x" } }],
+  "TimeConstraint": {
+    "ActivityDomain": "Work",
+    "Timeslots": [{
+      "Start": { "DateTime": "2026-10-12T09:00:00", "TimeZone": "Eastern Standard Time" },
+      "End":   { "DateTime": "2026-10-13T17:00:00", "TimeZone": "Eastern Standard Time" }
+    }]
+  },
+  "MeetingDuration": "PT45M",
+  "MaxCandidates": 3,
+  "ReturnSuggestionReasons": true
+}
+```
+
+Returns `EmptySuggestionsReason` plus `MeetingTimeSuggestions[]`, each with
+`Confidence`, `OrganizerAvailability`, `SuggestionReason`,
+`MeetingTimeSlot.{Start,End}` and `AttendeeAvailability[]`
+(`{Availability, Attendee.EmailAddress.Address}`).
+
+- **Slots come back in UTC** regardless of the request's `TimeZone` unless
+  `Prefer: outlook.timezone="…"` is sent. With it they are in that zone.
+- Listing the signed-in user as an attendee returns an **empty**
+  `AttendeeAvailability`: they are the organizer, and appear only as
+  `OrganizerAvailability`.
+- `PT30M` and `PT45M` both accepted.
+
+### `POST /me/calendar/getschedule`
+
+```json
+{
+  "Schedules": ["a@x"],
+  "StartTime": { "DateTime": "2026-10-12T09:00:00", "TimeZone": "Eastern Standard Time" },
+  "EndTime":   { "DateTime": "2026-10-12T17:00:00", "TimeZone": "Eastern Standard Time" },
+  "AvailabilityViewInterval": 30
+}
+```
+
+Returns `value[]` of `{ScheduleId, AvailabilityView, ScheduleItems[]}`, with
+items carrying `Status, Subject, Location, IsMeeting, IsRecurring, IsPrivate,
+Start, End`. `AvailabilityView` is one digit per interval (`0` free,
+`2` busy). The same `Prefer` timezone rule applies.
+
+An address that does not resolve still returns 200, as an entry with
+`Error: {Message: "MailRecipientNotFoundException…", ResponseCode: "5009"}`
+and no items. That must not be reported as "free".
+
+---
+
 ## Writes
 
 Each route was confirmed to exist and be authorised by POSTing a deliberately
@@ -107,8 +164,8 @@ invalid body and receiving **400**, not 401/403/404:
 | `POST /me/events` | `UnableToDeserializePostBody` |
 | `POST /me/contacts` | `UnableToDeserializePostBody` |
 
-**No write was executed during the build** — no mail was sent and nothing in
-the mailbox was mutated. The payload shapes the client sends are therefore
+**No mail write was executed during the build** — no mail was sent and no
+message was mutated (calendar exceptions below). The payload shapes the client sends are therefore
 *shapes*, not round-tripped captures, and every mutating tool asks for
 confirmation first — a prompt where the client supports one, otherwise a
 preview plus a single-use confirmToken (`MCP_CONFIRM_MODE`).
@@ -119,6 +176,28 @@ warning when the value did not move.
 
 Note `POST /me/messages/{id}/move` assigns the message a **new `Id`**; the old
 one stops resolving.
+
+### Teams meetings (executed live 2026-10-08)
+
+Unlike the routes above, these were **round-tripped**, on two test events with
+no attendees (so no invitations went out), and both were deleted afterwards:
+
+- `POST /me/events` with `"IsOnlineMeeting": true, "OnlineMeetingProvider":
+  "TeamsForBusiness"` returns the created event with `OnlineMeeting.JoinUrl`
+  already populated, and Outlook sets `Location` to "Microsoft Teams Meeting".
+- `PATCH /me/events/{id}` with the same two fields adds a Teams meeting to an
+  existing event. The re-read shows the join link.
+- `PATCH` with `Subject` and `Start`/`End` (as `DateTimeTimeZone`) persisted
+  as sent.
+- `DELETE /me/events/{id}` removed the event.
+
+The Teams link is at **`OnlineMeeting.JoinUrl`**. The older `OnlineMeetingUrl`
+is `""` on every Teams meeting read (73 of 73 over two weeks). An event with
+no online meeting has `OnlineMeeting: {}`, `IsOnlineMeeting: false` and
+`OnlineMeetingProvider: "Unknown"`. `$select=OnlineMeeting` works.
+
+`IsOrganizer: false` marks a meeting someone else organizes. An attendee's
+PATCH would change only their own copy, so `outlook_update_event` refuses it.
 
 ---
 

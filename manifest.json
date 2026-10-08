@@ -76,6 +76,14 @@
       "description": "List calendars in the mailbox"
     },
     {
+      "name": "outlook_find_meeting_times",
+      "description": "Find times when people can meet (Scheduling Assistant)"
+    },
+    {
+      "name": "outlook_get_schedule",
+      "description": "Get people's free/busy blocks for a window"
+    },
+    {
       "name": "outlook_get_profile",
       "description": "Get the signed-in mailbox identity"
     },
@@ -113,7 +121,11 @@
     },
     {
       "name": "outlook_create_event",
-      "description": "Create a calendar event (asks you to confirm first)"
+      "description": "Create a calendar event or Teams meeting (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_update_event",
+      "description": "Update a meeting you organize, adding Teams if missing (asks you to confirm first)"
     },
     {
       "name": "outlook_healthcheck",

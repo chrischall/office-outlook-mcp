@@ -91,7 +91,11 @@ export interface OutlookEvent {
   IsAllDay?: boolean;
   IsCancelled?: boolean;
   ShowAs?: string;
+  /** Legacy; live Teams meetings carry it as "" (2026-10-08). */
   OnlineMeetingUrl?: string;
+  IsOnlineMeeting?: boolean;
+  /** `{}` on an event with no online meeting. */
+  OnlineMeeting?: { JoinUrl?: string } | null;
   BodyPreview?: string;
   WebLink?: string;
 }
@@ -117,7 +121,9 @@ export function fullEvent(e: OutlookEvent): Record<string, unknown> {
     Attendees: e.Attendees?.map((a) =>
       pruned({ Who: addr(a), Response: a.Status?.Response }),
     ),
-    OnlineMeetingUrl: e.OnlineMeetingUrl,
+    // The Teams link lives under OnlineMeeting; OnlineMeetingUrl is empty on
+    // every live Teams meeting checked.
+    JoinUrl: e.OnlineMeeting?.JoinUrl || e.OnlineMeetingUrl || undefined,
     Preview: e.BodyPreview?.trim() || undefined,
     WebLink: e.WebLink,
   });

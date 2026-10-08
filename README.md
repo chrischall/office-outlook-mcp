@@ -108,13 +108,21 @@ Everything is optional — with nothing set, the server captures from the browse
 
 **Read** — `outlook_list_folders`, `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_attachments`, `outlook_list_events`,
-`outlook_get_event`, `outlook_list_calendars`, `outlook_get_profile`,
+`outlook_get_event`, `outlook_list_calendars`, `outlook_find_meeting_times`,
+`outlook_get_schedule`, `outlook_get_profile`,
 `outlook_get_mailbox_settings`, `outlook_list_contacts`, `outlook_list_people`,
 `outlook_list_tasks`
 
 **Write** (all ask you to confirm first — see [Confirmations](#confirmations)) — `outlook_send_mail`,
 `outlook_create_draft`, `outlook_mark_read`, `outlook_move_message`,
-`outlook_create_event`
+`outlook_create_event`, `outlook_update_event`
+
+**Meetings** — `outlook_find_meeting_times` asks Outlook's Scheduling
+Assistant for slots when everyone is free, and `outlook_get_schedule` shows
+each person's busy blocks. `outlook_create_event` and `outlook_update_event`
+attach a Microsoft Teams meeting by default and return its join link; pass
+`teamsMeeting: false` to leave it off. Only the organizer can update a
+meeting.
 
 **Diagnostics** — `outlook_healthcheck`
 
