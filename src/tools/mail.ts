@@ -45,7 +45,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         'List mail folders with unread and total counts. Use this to discover folder ids before listing messages; the well-known names (' +
         WELL_KNOWN.join(', ') +
         ') can be used directly without a lookup. Lists ONE level: top-level folders by default, or the child folders of `parent`. A folder with `Children` > 0 has subfolders — list them with `parent` set to its Id.',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         parent: z
@@ -77,7 +77,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       description:
         "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         folder: z
@@ -136,7 +136,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       description:
         'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); pass view:"raw" to get Outlook\'s untouched record.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         id: z.string().min(1).describe('Message Id from outlook_list_messages'),
@@ -161,7 +161,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     {
       description:
         "List a message's attachments (name, size, content type). Metadata only — this deliberately does not download bytes.",
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         nextLink: nextLinkParam,

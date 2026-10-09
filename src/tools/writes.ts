@@ -146,7 +146,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         TIMEOUT_SENTENCE +
         ' ' +
         CONFIRM_INJECTION_RULE,
-      annotations: { readOnlyHint: false, destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       inputSchema: z.object({
         to: recipientList,
         cc: recipientList,
@@ -195,7 +195,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be reviewed and sent from Outlook.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       inputSchema: z.object({
         to: recipientList,
         cc: recipientList,
@@ -238,7 +238,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         'Mark a message read or unread. The result is verified by re-reading the message — a 2xx alone is not proof it persisted.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         isRead: z.boolean().describe('true to mark read, false to mark unread'),
@@ -279,7 +279,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         'Move a message to another folder (e.g. "archive", "deleteditems", or a folder id from outlook_list_folders). Moving assigns a NEW message id, which is returned.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         destination: z
@@ -329,7 +329,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         TIMEOUT_SENTENCE +
         ' ' +
         CONFIRM_INJECTION_RULE,
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       inputSchema: z.object({
         subject: z.string().describe('Event title'),
         start: z.string().min(1).describe('Start, ISO 8601 local time e.g. 2026-09-22T15:00:00'),
@@ -415,7 +415,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         CONFIRM_FLOW_SENTENCE +
         ' ' +
         CONFIRM_INJECTION_RULE,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: z.object({
         id: z.string().min(1).describe('Event Id from outlook_list_events or outlook_get_event'),
         subject: z.string().optional().describe('New title'),

@@ -18,7 +18,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
     {
       description:
         "Get the signed-in mailbox's identity (email address, display name, alias). The cheapest call that proves the credential works.",
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({}),
     },
     async () => minifiedResult(stripOData(await client.get<Record<string, unknown>>('/me'))),
@@ -29,7 +29,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
     {
       description:
         'Get mailbox settings: time zone, working hours, language, and automatic-replies (out-of-office) configuration.',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({}),
     },
     async () =>
@@ -40,7 +40,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
     'outlook_list_contacts',
     {
       description: 'List saved contacts from the mailbox address book.',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(200).optional().describe('Max contacts (default 50)'),
@@ -72,7 +72,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
     {
       description:
         'List people ranked by relevance to the user — colleagues and frequent correspondents, drawn from mail traffic rather than the saved address book. Better than outlook_list_contacts for resolving "who is X" in a work mailbox.',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(100).optional().describe('Max people (default 25)'),
@@ -99,7 +99,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
     'outlook_list_tasks',
     {
       description: 'List Outlook tasks with status and due dates.',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         limit: z.number().int().min(1).max(200).optional().describe('Max tasks (default 50)'),

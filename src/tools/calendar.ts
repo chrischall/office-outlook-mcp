@@ -86,7 +86,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       description:
         'List calendar events in a date window. This uses the calendar VIEW, which expands recurring series into their individual occurrences — the right tool for "what is on my schedule". Times are returned in `timeZone` when given.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         start: z
@@ -135,7 +135,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       description:
         'Get one calendar event in full, including attendees and their responses.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         id: z.string().min(1).describe('Event Id from outlook_list_events'),
@@ -158,7 +158,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     'outlook_list_calendars',
     {
       description: 'List the calendars in the mailbox, for picking one to read or write against.',
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         nextLink: nextLinkParam,
@@ -180,7 +180,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       description:
         "Find times when people can meet — Outlook's Scheduling Assistant. Give the attendees, a search window and a duration; Outlook checks everyone's free/busy (and the signed-in user's, as organizer) and returns ranked candidate slots with each attendee's availability. By default only working hours are searched. Use this to answer \"when can X and Y meet?\"; then book with outlook_create_event. `start`/`end` are local wall-clock times in `timeZone` (default: the mailbox zone), and returned slots are in that zone too." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         attendees: attendeeList('required attendees').min(1),
@@ -273,7 +273,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       description:
         "Get people's free/busy blocks for a time window — the grid view of Outlook's Scheduling Assistant. Returns each person's busy, tentative and out-of-office items (with subject and location where their calendar shares them). Use outlook_find_meeting_times to have Outlook pick slots instead. `start`/`end` are local wall-clock times in `timeZone` (default: the mailbox zone)." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
         people: attendeeList('people (or rooms) to look up').min(1).max(100),
