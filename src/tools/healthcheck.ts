@@ -12,9 +12,10 @@ import type { OutlookClient } from '../client.js';
  * thing to report — what a broken install needs to know is whether a token
  * resolved and whether Outlook accepted it.
  *
- * Imported from `/healthcheck`, deliberately NOT from `/fetchproxy`: that
- * module pulls in the optional `@fetchproxy/server` peer, which is absent in
- * the `.mcpb` bundle.
+ * Imported from `/healthcheck`, not from `/fetchproxy`: the credential check
+ * needs nothing from the bridge, and `/fetchproxy` would load
+ * `@fetchproxy/server` at boot. (It is bundled into `dist/bundle.js`, so this
+ * is about not loading it eagerly, not about it being missing.)
  */
 export function registerHealthcheckTool(server: McpServer, client: OutlookClient): void {
   registerCredentialHealthcheckTool({

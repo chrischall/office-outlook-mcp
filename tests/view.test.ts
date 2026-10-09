@@ -6,6 +6,7 @@ import {
   fullEvent,
   fullMessage,
   projectCollection,
+  VIEWS,
 } from '../src/view.js';
 
 /** A message shaped like the live 2026-09-20 capture. */
@@ -137,5 +138,11 @@ describe('collection envelope', () => {
     };
     const out = projectCollection({ value: [{ Id: 'x' }] }, boom, 'message');
     expect(out.items).toEqual([{ Id: 'x' }]);
+  });
+});
+
+describe('VIEWS', () => {
+  it('is the one shared view list every read tool offers', () => {
+    expect(VIEWS).toEqual(['compact', 'full', 'raw']);
   });
 });

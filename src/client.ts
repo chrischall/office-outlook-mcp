@@ -21,19 +21,22 @@ import { createTokenCache, reportCacheWriteFailure } from './token-cache.js';
  * Load the bridge bootstrap lazily.
  *
  * `auth-fetchproxy.ts` pulls in `@chrischall/mcp-utils/fetchproxy`, which
- * imports the OPTIONAL `@fetchproxy/server` peer. That package is
- * esbuild-`--external`, and the `.mcpb` bundle ships no `node_modules` — so a
- * top-level import here would throw `ERR_MODULE_NOT_FOUND` the moment a host
- * spawns the bundled server, before it can answer `initialize`. The host then
- * reports only "Server transport closed unexpectedly".
+ * imports `@fetchproxy/server`. In `dist/bundle.js` that package is INLINED —
+ * the bundle script marks only `dotenv` as `--external` — so the `.mcpb`
+ * needs no `node_modules` for it, and a top-level import would also work.
  *
- * Deferring it means the default path never touches the package, and a user who
- * supplies `OUTLOOK_ACCESS_TOKEN` never needs it installed at all.
+ * The dynamic import only DEFERS loading: the bridge module (and, for a plain
+ * `npm` install, the package itself) is evaluated on the first capture rather
+ * than at boot, so a server running on `OUTLOOK_ACCESS_TOKEN` or a cached token
+ * never initialises it.
  */
 async function captureTokenLazily(): Promise<string> {
   const mod = await import('./auth-fetchproxy.js');
   return mod.captureTokenViaFetchproxy();
 }
+
+/** OData query parameters (`$top`, `$select`, …) for a GET. Unset values are omitted. */
+export type QueryParams = Record<string, string | number | undefined>;
 
 /**
  * The API the captured token is minted for.
@@ -217,9 +220,13 @@ export class OutlookClient {
    * — measured 9.4x smaller on a real message, and it also normalises a mixed
    * HTML/Text collection to one type. `prefer` sets the `Prefer` header
    * directly, for anything else the API takes there (notably
-   * `outlook.timezone="…"`).
+   * `outlook.timezone="…"`). `query` is serialised by mcp-utils'
+   * `buildQueryString`, which drops `undefined`/empty values.
    */
-  async get<T>(path: string, opts: { text?: boolean; prefer?: string } = {}): Promise<T> {
+  async get<T>(
+    path: string,
+    opts: { text?: boolean; prefer?: string; query?: QueryParams } = {},
+  ): Promise<T> {
     this.#requireConfigured();
     const prefer = [
       opts.text ? 'outlook.body-content-type="text"' : undefined,
@@ -227,6 +234,7 @@ export class OutlookClient {
     ].filter((p): p is string => p !== undefined);
     return this.#client().fetchJson<T>('GET', path, {
       headers: prefer.length ? { Prefer: prefer.join(', ') } : undefined,
+      ...(opts.query ? { query: opts.query } : {}),
     });
   }
 
