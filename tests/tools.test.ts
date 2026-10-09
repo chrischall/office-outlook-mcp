@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
-import { RequestTimeoutError } from '@chrischall/mcp-utils';
+import { RequestTimeoutError, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerMailTools } from '../src/tools/mail.js';
 import { registerWriteTools } from '../src/tools/writes.js';
@@ -341,8 +341,10 @@ describe('write tools are confirmation-gated', () => {
     // The confirm token is spent by then, and Outlook often accepted the
     // request (sendmail queues with a 202). A plain error invites the model
     // to start over — fresh preview, fresh token, a second identical email.
+    // Since mcp-utils 3 the client throws WriteOutcomeUnknownError for a
+    // timed-out (or dropped) write, not RequestTimeoutError.
     const write = vi.fn(async () => {
-      throw new RequestTimeoutError('Outlook', 60_000);
+      throw new WriteOutcomeUnknownError('Outlook', 'POST', { timeoutMs: 60_000 });
     });
     const { client } = stubClient({ write });
     const h = await harnessFor(registerWriteTools, client);
@@ -353,6 +355,32 @@ describe('write tools are confirmation-gated', () => {
     expect(res.warning).toMatch(where);
     expect(res.warning).toMatch(/before retrying/);
     expect(write).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('reports a write whose connection dropped as unknown too', async () => {
+    const write = vi.fn(async () => {
+      throw new WriteOutcomeUnknownError('Outlook', 'POST', { cause: new TypeError('fetch failed') });
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    expect(raw.isError).toBeFalsy();
+    const res = parseToolResult<{ status?: string; warning?: string }>(raw);
+    expect(res.status).toBe('unknown');
+    expect(res.warning).toMatch(/Sent Items/);
+    await h.close();
+  });
+
+  it('does not treat a plain RequestTimeoutError as an unknown write', async () => {
+    // Only the client's WriteOutcomeUnknownError means "sent, outcome unknown".
+    const write = vi.fn(async () => {
+      throw new RequestTimeoutError('Outlook', 60_000);
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    expect(raw.isError).toBe(true);
     await h.close();
   });
 

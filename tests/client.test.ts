@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import { OutlookClient, DEFAULT_API_BASE } from '../src/client.js';
 import { stripBearer, raceCaptures } from '../src/auth-fetchproxy.js';
 
@@ -136,6 +137,37 @@ describe('requests', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body))).toEqual({ MaxCandidates: 1 });
     expect(preferOf(fetchImpl, 0)).toBe('outlook.timezone="Eastern Standard Time"');
+  });
+
+  it('treats a read-only POST that loses its connection as a plain failure, not an unknown write', async () => {
+    // mcp-utils 3 turns a dropped/timed-out non-GET into WriteOutcomeUnknownError
+    // ("the write may have happened"). findmeetingtimes/getschedule change
+    // nothing, so they must stay safe to retry.
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const err = await c.post('/me/findmeetingtimes', {}).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(WriteOutcomeUnknownError);
+    expect(String(err)).toMatch(/fetch failed/);
+  });
+
+  it('reports a write that loses its connection as outcome-unknown', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(c.write('POST', '/me/sendmail', {})).rejects.toBeInstanceOf(
+      WriteOutcomeUnknownError,
+    );
   });
 
   it('refuses to follow a pagination link off the API origin', async () => {

@@ -7,7 +7,7 @@ import {
   confirmWrite,
   McpToolError,
   minifiedResult,
-  RequestTimeoutError,
+  WriteOutcomeUnknownError,
 } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
 import { mailboxTimeZone } from '../timezone.js';
@@ -98,10 +98,12 @@ function dateTimeTimeZone(value: string, zone: string): { DateTime: string; Time
  * unknown. Kept next to {@link unknownOutcome} so the two cannot drift.
  */
 const TIMEOUT_SENTENCE =
-  'If Outlook does not answer in time the result has status "unknown": the write may well have gone through, so check before retrying — never resend blindly.';
+  'If Outlook does not answer in time (or the connection drops) the result has status "unknown": the write may well have gone through, so check before retrying — never resend blindly.';
 
 /**
- * Run a non-idempotent write; a timeout becomes a non-error "unknown" result.
+ * Run a non-idempotent write; a timeout or dropped connection after the
+ * request was sent (mcp-utils' WriteOutcomeUnknownError) becomes a non-error
+ * "unknown" result.
  *
  * By the time the write runs the confirm token is spent, and Outlook has
  * often already accepted the request (sendmail queues with a 202). A plain
@@ -116,12 +118,12 @@ async function writeOrUnknown<T>(
   try {
     return { ok: true, value: await run() };
   } catch (e) {
-    if (!(e instanceof RequestTimeoutError)) throw e;
+    if (!(e instanceof WriteOutcomeUnknownError)) throw e;
     return {
       ok: false,
       result: minifiedResult({
         status: 'unknown',
-        warning: `Outlook did not answer in time, so this may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
+        warning: `Outlook did not confirm this write (${e.timedOut ? 'it did not answer in time' : 'the connection dropped'}), so it may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
       }),
     };
   }

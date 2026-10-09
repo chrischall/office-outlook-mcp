@@ -284,6 +284,9 @@ export class OutlookClient {
     return this.#client().fetchJson<T>('POST', path, {
       body,
       headers: opts.prefer ? { Prefer: opts.prefer } : undefined,
+      // Read-only: a timeout or dropped connection is safe to retry, so keep
+      // the plain error rather than mcp-utils' WriteOutcomeUnknownError.
+      idempotent: true,
     });
   }
 
