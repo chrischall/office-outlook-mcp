@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.4.0...v0.4.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* annotate tools truthfully and sync manifests with the served tools ([#58](https://github.com/chrischall/office-outlook-mcp/issues/58)) ([3753d9f](https://github.com/chrischall/office-outlook-mcp/commit/3753d9f336d230cfd2d45cdc582cba89334632d3))
+* build Outlook query strings with mcp-utils' buildQueryString ([#56](https://github.com/chrischall/office-outlook-mcp/issues/56)) ([f1904c6](https://github.com/chrischall/office-outlook-mcp/commit/f1904c68e8cff040da11176c05b53dc6c1781061))
+* **deps:** update @chrischall/mcp-utils to 3.0.0 ([#57](https://github.com/chrischall/office-outlook-mcp/issues/57)) ([c86e8c2](https://github.com/chrischall/office-outlook-mcp/commit/c86e8c296ea1419220fe497187862d763d2883c3))
+* drop the esbuild defines that only silenced a lint false positive ([#59](https://github.com/chrischall/office-outlook-mcp/issues/59)) ([73360d5](https://github.com/chrischall/office-outlook-mcp/commit/73360d5f36916c5a71bb892c8641c28114e3739d))
+* point the plugin at its MCP config with the mcpServers key Claude Code reads ([#60](https://github.com/chrischall/office-outlook-mcp/issues/60)) ([b00cc67](https://github.com/chrischall/office-outlook-mcp/commit/b00cc672f2f3756a81878569c3f66fffac2a49b5))
+* resolve low-severity audit findings ([#54](https://github.com/chrischall/office-outlook-mcp/issues/54)) ([b0d4e86](https://github.com/chrischall/office-outlook-mcp/commit/b0d4e861d1f2aef519b16dca051bd96cc3be95df))
+
 ## [0.4.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.3.5...v0.4.0) (2026-10-08)
 
 
