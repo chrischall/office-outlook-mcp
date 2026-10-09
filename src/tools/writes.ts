@@ -313,8 +313,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ...(attendees ?? []).map((a) => attendee(a, 'Required')),
         ...(optionalAttendees ?? []).map((a) => attendee(a, 'Optional')),
       ];
-      // Falls back to UTC only when the mailbox itself declares no zone.
-      const tz = timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
+      // Falls back to UTC only when the mailbox itself declares no zone; a
+      // failed lookup refuses rather than guessing.
+      const tz = timeZone ?? (await mailboxTimeZone(client, { required: true })) ?? 'UTC';
       const payload = {
         Subject: subject,
         Start: { DateTime: start, TimeZone: tz },
@@ -353,6 +354,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         created: true,
         Id: created?.Id,
         WebLink: created?.WebLink,
+        TimeZone: tz,
         ...(joinUrl ? { JoinUrl: joinUrl } : {}),
         ...(wantTeams && !joinUrl
           ? { warning: 'The event was created, but Outlook returned no Teams join link.' }
@@ -393,7 +395,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       }),
     },
     async (args, ctx) => {
-      const tz = args.timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
+      const tz = args.timeZone ?? (await mailboxTimeZone(client, { required: true })) ?? 'UTC';
       const path = `/me/events/${encodeURIComponent(args.id)}`;
       const readEvent = (zone: string) =>
         client.get<StoredEvent>(`${path}?$select=${EVENT_STATE_SELECT}`, {

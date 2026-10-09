@@ -14,16 +14,22 @@
  * would leak between tests in file order, which is how a test that believes it
  * exercised the failure path quietly stops doing so.
  *
- * A failure is swallowed deliberately — the zone is a default, not a
- * requirement, and must not take the calendar down with it — and is NOT
- * cached, so a transient blip does not pin the mailbox to UTC for the life of
- * the server.
+ * For a READ a failure is swallowed deliberately — the zone is a default, not
+ * a requirement, and must not take the calendar down with it. A WRITE passes
+ * `required: true` and gets an error instead: there the fallback is booking
+ * the caller's "3pm" in UTC, with invitations already sent. Either way a
+ * failure is NOT cached, so a transient blip does not pin the mailbox to UTC
+ * for the life of the server.
  */
+import { McpToolError } from '@chrischall/mcp-utils';
 import type { OutlookClient } from './client.js';
 
 const zoneByClient = new WeakMap<OutlookClient, string>();
 
-export async function mailboxTimeZone(client: OutlookClient): Promise<string | undefined> {
+export async function mailboxTimeZone(
+  client: OutlookClient,
+  opts: { required?: boolean } = {},
+): Promise<string | undefined> {
   const cached = zoneByClient.get(client);
   if (cached) return cached;
   try {
@@ -31,7 +37,12 @@ export async function mailboxTimeZone(client: OutlookClient): Promise<string | u
     const zone = settings?.TimeZone?.trim() || undefined;
     if (zone) zoneByClient.set(client, zone);
     return zone;
-  } catch {
-    return undefined;
+  } catch (e) {
+    if (!opts.required) return undefined;
+    throw new McpToolError("Could not read the mailbox's time zone, so the event time is ambiguous.", {
+      hint:
+        'Retry, or pass `timeZone` explicitly (a Windows zone name such as "Eastern Standard Time"). ' +
+        `Cause: ${e instanceof Error ? e.message : String(e)}`,
+    });
   }
 }

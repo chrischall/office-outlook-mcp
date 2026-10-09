@@ -285,6 +285,48 @@ describe('write tools are confirmation-gated', () => {
     await h.close();
   });
 
+  it.each([
+    ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00' }],
+    ['outlook_update_event', { id: 'e1', start: '2026-09-22T15:00:00' }],
+  ] as const)('%s refuses to write when the mailbox zone lookup fails, rather than booking in UTC', async (name, args) => {
+    // A transient 5xx/429 on MailboxSettings used to fall through to 'UTC',
+    // and a caller who went straight to the confirmed write booked "3pm"
+    // four or five hours off, with invitations already sent. A read can
+    // degrade; a write must not guess.
+    const get = vi.fn(async (path: string) => {
+      if (path.includes('MailboxSettings')) throw new Error('503 Service Unavailable');
+      return { Id: 'e1', IsOrganizer: true, Start: { DateTime: '2026-09-22T09:00:00' }, End: { DateTime: '2026-09-22T10:00:00' } };
+    });
+    const { client, calls } = stubClient({ get });
+    const h = await harnessFor(registerWriteTools, client);
+    const res = await h.callTool(name, { ...args, confirmToken: 'anything' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/time zone/i);
+    expect(JSON.stringify(res.content)).toContain('timeZone');
+    expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
+    await h.close();
+  });
+
+  it('reports the zone a created event was booked in', async () => {
+    const get = vi.fn(async (path: string) => {
+      if (path.includes('MailboxSettings')) return { TimeZone: 'Eastern Standard Time' };
+      return {};
+    });
+    const { client } = stubClient({ get });
+    const h = await harnessFor(registerWriteTools, client);
+    const res = parseToolResult<{ created?: boolean; TimeZone?: string }>(
+      await confirmedCall(h, 'outlook_create_event', {
+        subject: 's',
+        start: '2026-09-22T15:00:00',
+        end: '2026-09-22T16:00:00',
+        teamsMeeting: false,
+      }),
+    );
+    expect(res.created).toBe(true);
+    expect(res.TimeZone).toBe('Eastern Standard Time');
+    await h.close();
+  });
+
   it.each(writeTools)('%s writes nothing without a confirmToken', async (name, args) => {
     // The gate stops MUTATIONS. `outlook_create_event` first reads the mailbox
     // time zone so the preview can state the zone it would book in — a
