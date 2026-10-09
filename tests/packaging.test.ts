@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { versionSyncTest } from '@chrischall/mcp-utils/test';
@@ -110,11 +110,35 @@ describe('publish scaffold', () => {
     // files: a plugin install defines `${CLAUDE_PLUGIN_ROOT}` and a
     // project-scoped `.mcp.json` does not. Sharing one file broke whichever
     // path it was not written for.
-    const pluginMcp = read('.claude-plugin/plugin.json').mcp as string;
-    const cfg = read(join('.claude-plugin', pluginMcp.replace(/^\.\//, '')));
-    const server = cfg.mcpServers.outlook;
-    expect(server.args.join(' ')).toContain('${CLAUDE_PLUGIN_ROOT}');
-    expect(server.args.join(' ')).toContain('dist/bundle.js');
+    //
+    // The key is `mcpServers`, and its path resolves against the PLUGIN ROOT
+    // (the folder holding .claude-plugin/), not against .claude-plugin/. The
+    // old `mcp` key is unknown to Claude Code, which ignores it at load time
+    // (`claude plugin validate` says so), leaving the plugin on the root
+    // `.mcp.json` and its cwd-relative path.
+    const plugin = read('.claude-plugin/plugin.json');
+    expect(plugin).not.toHaveProperty('mcp');
+    expect(typeof plugin.mcpServers).toBe('string');
+    const pluginMcp = plugin.mcpServers as string;
+    expect(existsSync(join(root, pluginMcp))).toBe(true);
+    const cfg = read(pluginMcp);
+    const names = Object.keys(cfg.mcpServers);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const args = cfg.mcpServers[name].args.join(' ');
+      expect(args).toContain('${CLAUDE_PLUGIN_ROOT}');
+      expect(args).toContain('dist/bundle.js');
+    }
+  });
+
+  it('names the plugin server the same as the root .mcp.json server', () => {
+    // A plugin install loads the root `.mcp.json` first; a later server with
+    // the SAME name replaces it. Matching names are what let the
+    // ${CLAUDE_PLUGIN_ROOT} config override the cwd-relative one.
+    const cfg = read(read('.claude-plugin/plugin.json').mcpServers as string);
+    expect(Object.keys(cfg.mcpServers).sort()).toEqual(
+      Object.keys(read('.mcp.json').mcpServers).sort(),
+    );
   });
 
   it('ships the files an install and a registration need', () => {
