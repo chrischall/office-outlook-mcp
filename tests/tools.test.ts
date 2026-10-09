@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
+import { RequestTimeoutError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerMailTools } from '../src/tools/mail.js';
 import { registerWriteTools } from '../src/tools/writes.js';
@@ -221,6 +222,19 @@ describe('read tools', () => {
     await h.close();
   });
 
+  it('lists the child folders of a parent folder', async () => {
+    // /me/mailfolders returns the top level only; Inbox/Receipts lives under
+    // /me/mailfolders/{id}/childfolders, and without a way to reach it the
+    // model cannot list or move to a nested folder at all.
+    const { client, calls } = stubClient();
+    const h = await harnessFor(registerMailTools, client);
+    await h.callTool('outlook_list_folders', { parent: 'inbox' });
+    expect(calls[0].path).toBe('/me/mailfolders/inbox/childfolders?$top=50');
+    await h.callTool('outlook_list_folders', {});
+    expect(calls[1].path).toBe('/me/mailfolders?$top=50');
+    await h.close();
+  });
+
   it('registers the expected read surface', async () => {
     const { client } = stubClient();
     const h = await harnessFor(registerDirectoryTools, client);
@@ -269,6 +283,89 @@ describe('write tools are confirmation-gated', () => {
     expect(res.preview?.action).toContain('Eastern Standard Time');
     // Still only a preview: the zone lookup is a GET, and nothing was written.
     expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
+    await h.close();
+  });
+
+  it.each([
+    ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00' }],
+    ['outlook_update_event', { id: 'e1', start: '2026-09-22T15:00:00' }],
+  ] as const)('%s refuses to write when the mailbox zone lookup fails, rather than booking in UTC', async (name, args) => {
+    // A transient 5xx/429 on MailboxSettings used to fall through to 'UTC',
+    // and a caller who went straight to the confirmed write booked "3pm"
+    // four or five hours off, with invitations already sent. A read can
+    // degrade; a write must not guess.
+    const get = vi.fn(async (path: string) => {
+      if (path.includes('MailboxSettings')) throw new Error('503 Service Unavailable');
+      return { Id: 'e1', IsOrganizer: true, Start: { DateTime: '2026-09-22T09:00:00' }, End: { DateTime: '2026-09-22T10:00:00' } };
+    });
+    const { client, calls } = stubClient({ get });
+    const h = await harnessFor(registerWriteTools, client);
+    const res = await h.callTool(name, { ...args, confirmToken: 'anything' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/time zone/i);
+    expect(JSON.stringify(res.content)).toContain('timeZone');
+    expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
+    await h.close();
+  });
+
+  it('reports the zone a created event was booked in', async () => {
+    const get = vi.fn(async (path: string) => {
+      if (path.includes('MailboxSettings')) return { TimeZone: 'Eastern Standard Time' };
+      return {};
+    });
+    const { client } = stubClient({ get });
+    const h = await harnessFor(registerWriteTools, client);
+    const res = parseToolResult<{ created?: boolean; TimeZone?: string }>(
+      await confirmedCall(h, 'outlook_create_event', {
+        subject: 's',
+        start: '2026-09-22T15:00:00',
+        end: '2026-09-22T16:00:00',
+        teamsMeeting: false,
+      }),
+    );
+    expect(res.created).toBe(true);
+    expect(res.TimeZone).toBe('Eastern Standard Time');
+    await h.close();
+  });
+
+  it.each([
+    ['outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }, /Sent Items/],
+    ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00', timeZone: 'UTC' }, /calendar/],
+  ] as const)('%s reports a timed-out write as unknown, not as a failure to retry', async (name, args, where) => {
+    // The confirm token is spent by then, and Outlook often accepted the
+    // request (sendmail queues with a 202). A plain error invites the model
+    // to start over — fresh preview, fresh token, a second identical email.
+    const write = vi.fn(async () => {
+      throw new RequestTimeoutError('Outlook', 60_000);
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await confirmedCall(h, name, args);
+    expect(raw.isError).toBeFalsy();
+    const res = parseToolResult<{ status?: string; warning?: string }>(raw);
+    expect(res.status).toBe('unknown');
+    expect(res.warning).toMatch(where);
+    expect(res.warning).toMatch(/before retrying/);
+    expect(write).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('still reports any other send failure as an error', async () => {
+    const write = vi.fn(async () => {
+      throw new Error('400 Bad Request');
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    expect(raw.isError).toBe(true);
+    await h.close();
+  });
+
+  it.each(['outlook_send_mail', 'outlook_create_event'])('%s describes the timeout case', async (name) => {
+    const { client } = stubClient();
+    const h = await harnessFor(registerWriteTools, client);
+    const tool = (await h.listTools()).find((t) => t.name === name);
+    expect(tool?.description).toMatch(/status "unknown"/);
     await h.close();
   });
 

@@ -98,6 +98,14 @@ describe('folder projection', () => {
     expect(compactFolder({ Id: 'f', DisplayName: 'Archive', UnreadItemCount: 0, TotalItemCount: 0 }))
       .toEqual({ Id: 'f', Name: 'Archive', Unread: 0, Total: 0 });
   });
+
+  it('says how many child folders there are, so the model knows to drill in', () => {
+    // outlook_list_folders lists one level. Without this count a nested
+    // folder (Inbox/Receipts) is invisible: nothing says it exists.
+    expect(
+      compactFolder({ Id: 'i', DisplayName: 'Inbox', UnreadItemCount: 1, TotalItemCount: 9, ChildFolderCount: 2 }),
+    ).toEqual({ Id: 'i', Name: 'Inbox', Unread: 1, Total: 9, Children: 2 });
+  });
 });
 
 describe('collection envelope', () => {

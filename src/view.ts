@@ -146,6 +146,8 @@ export function compactFolder(f: OutlookFolder): Record<string, unknown> {
     Name: f.DisplayName,
     Unread: f.UnreadItemCount,
     Total: f.TotalItemCount,
+    // Listings are one level deep; a non-zero count says there is more below.
+    Children: f.ChildFolderCount,
   });
 }
 

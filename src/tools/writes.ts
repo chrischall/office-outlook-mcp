@@ -7,6 +7,7 @@ import {
   confirmWrite,
   McpToolError,
   minifiedResult,
+  RequestTimeoutError,
 } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
 import { mailboxTimeZone } from '../timezone.js';
@@ -92,6 +93,40 @@ function dateTimeTimeZone(value: string, zone: string): { DateTime: string; Time
   return { DateTime: value, TimeZone: zone };
 }
 
+/**
+ * Tool-description sentence for a write whose timeout leaves the outcome
+ * unknown. Kept next to {@link unknownOutcome} so the two cannot drift.
+ */
+const TIMEOUT_SENTENCE =
+  'If Outlook does not answer in time the result has status "unknown": the write may well have gone through, so check before retrying — never resend blindly.';
+
+/**
+ * Run a non-idempotent write; a timeout becomes a non-error "unknown" result.
+ *
+ * By the time the write runs the confirm token is spent, and Outlook has
+ * often already accepted the request (sendmail queues with a 202). A plain
+ * error invites the model to start over — fresh preview, fresh token — and
+ * send a second identical email. Any other failure is a real failure and
+ * still throws.
+ */
+async function writeOrUnknown<T>(
+  run: () => Promise<T>,
+  checkWhere: string,
+): Promise<{ ok: true; value: T } | { ok: false; result: ReturnType<typeof minifiedResult> }> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (e) {
+    if (!(e instanceof RequestTimeoutError)) throw e;
+    return {
+      ok: false,
+      result: minifiedResult({
+        status: 'unknown',
+        warning: `Outlook did not answer in time, so this may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
+      }),
+    };
+  }
+}
+
 /** Wall-clock arithmetic: both sides are naive times in one zone. */
 const naiveMs = (dt: string) => Date.parse(`${dt.replace(/\.\d+$/, '')}Z`);
 const fromNaiveMs = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, '');
@@ -106,6 +141,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' The preview shows exactly what would be sent. ' +
+        TIMEOUT_SENTENCE +
+        ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true },
       inputSchema: z.object({
@@ -141,7 +178,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         confirmToken,
       });
       if (gate) return gate;
-      await client.write('POST', '/me/sendmail', payload);
+      const sent = await writeOrUnknown(() => client.write('POST', '/me/sendmail', payload), 'Sent Items');
+      if (!sent.ok) return sent.result;
       // sendmail returns 202 with an empty body; there is no id to report and
       // no resource to re-read, so say exactly what is known.
       return minifiedResult({ sent: true, subject, recipients: recipients || null });
@@ -286,6 +324,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' ' +
+        TIMEOUT_SENTENCE +
+        ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: false },
       inputSchema: z.object({
@@ -313,8 +353,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ...(attendees ?? []).map((a) => attendee(a, 'Required')),
         ...(optionalAttendees ?? []).map((a) => attendee(a, 'Optional')),
       ];
-      // Falls back to UTC only when the mailbox itself declares no zone.
-      const tz = timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
+      // Falls back to UTC only when the mailbox itself declares no zone; a
+      // failed lookup refuses rather than guessing.
+      const tz = timeZone ?? (await mailboxTimeZone(client, { required: true })) ?? 'UTC';
       const payload = {
         Subject: subject,
         Start: { DateTime: start, TimeZone: tz },
@@ -335,11 +376,12 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         confirmToken,
       });
       if (gate) return gate;
-      const created = await client.write<StoredEvent & { WebLink?: string }>(
-        'POST',
-        '/me/events',
-        payload,
+      const write = await writeOrUnknown(
+        () => client.write<StoredEvent & { WebLink?: string }>('POST', '/me/events', payload),
+        'the calendar (outlook_list_events)',
       );
+      if (!write.ok) return write.result;
+      const created = write.value;
       let joinUrl = joinUrlOf(created);
       // A 201 is not proof the Teams meeting was provisioned — the link is.
       // Re-read once in case it was filled in after the create returned.
@@ -353,6 +395,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         created: true,
         Id: created?.Id,
         WebLink: created?.WebLink,
+        TimeZone: tz,
         ...(joinUrl ? { JoinUrl: joinUrl } : {}),
         ...(wantTeams && !joinUrl
           ? { warning: 'The event was created, but Outlook returned no Teams join link.' }
@@ -393,7 +436,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       }),
     },
     async (args, ctx) => {
-      const tz = args.timeZone ?? (await mailboxTimeZone(client)) ?? 'UTC';
+      const tz = args.timeZone ?? (await mailboxTimeZone(client, { required: true })) ?? 'UTC';
       const path = `/me/events/${encodeURIComponent(args.id)}`;
       const readEvent = (zone: string) =>
         client.get<StoredEvent>(`${path}?$select=${EVENT_STATE_SELECT}`, {

@@ -84,8 +84,8 @@ sys.stdout.write(v.strip())
   esac
 
   local rc_file; rc_file="$(_outlook_curlrc)"
-  umask 077
-  printf 'header = "Authorization: %s"\n' "$token" > "$rc_file" || return 1
+  # Subshell: this file is sourced, and a bare `umask` would outlive the call.
+  ( umask 077; printf 'header = "Authorization: %s"\n' "$token" > "$rc_file" ) || return 1
   chmod 600 "$rc_file" 2>/dev/null
   echo "token stored in $rc_file ($(outlook_token_expiry))" >&2
 }
