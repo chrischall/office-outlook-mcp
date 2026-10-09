@@ -33,7 +33,15 @@
         "${__dirname}/dist/bundle.js"
       ],
       "env": {
-        "OUTLOOK_ACCESS_TOKEN": "${user_config.outlook_access_token}"
+        "OUTLOOK_ACCESS_TOKEN": "${user_config.outlook_access_token}",
+        "OUTLOOK_DISABLE_FETCHPROXY": "${user_config.outlook_disable_fetchproxy}",
+        "OUTLOOK_API_BASE": "${user_config.outlook_api_base}",
+        "OUTLOOK_WS_PORT": "${user_config.outlook_ws_port}",
+        "OUTLOOK_CAPTURE_TIMEOUT": "${user_config.outlook_capture_timeout}",
+        "OUTLOOK_TOKEN_CACHE": "${user_config.outlook_token_cache}",
+        "OUTLOOK_TOKEN_FILE": "${user_config.outlook_token_file}",
+        "FETCHPROXY_WS_HOST": "${user_config.fetchproxy_ws_host}",
+        "FETCHPROXY_IDENTITY_DIR": "${user_config.fetchproxy_identity_dir}"
       }
     }
   },
@@ -44,6 +52,54 @@
       "description": "A pre-obtained Outlook bearer token. Leave blank to capture one from your signed-in Outlook browser tab via the ContextMint Bridge extension.",
       "required": false,
       "sensitive": true
+    },
+    "outlook_disable_fetchproxy": {
+      "type": "string",
+      "title": "Disable browser capture (advanced)",
+      "description": "Set to '1' to disable browser capture, requiring OUTLOOK_ACCESS_TOKEN.",
+      "required": false
+    },
+    "outlook_api_base": {
+      "type": "string",
+      "title": "Outlook REST base URL (advanced)",
+      "description": "Override the Outlook REST base URL. Defaults to https://outlook.office.com/api/v2.0.",
+      "required": false
+    },
+    "outlook_ws_port": {
+      "type": "string",
+      "title": "fetchproxy port (advanced)",
+      "description": "fetchproxy concentrator port used for token capture. Defaults to 37149, the fleet-wide shared port.",
+      "required": false
+    },
+    "outlook_capture_timeout": {
+      "type": "string",
+      "title": "Token capture timeout in seconds (advanced)",
+      "description": "Seconds to wait for the Outlook tab to make a request we can read a token from. Defaults to 30.",
+      "required": false
+    },
+    "outlook_token_cache": {
+      "type": "string",
+      "title": "Cache the captured token (advanced)",
+      "description": "Set to 'false' to stop caching the captured token between runs. Defaults to true.",
+      "required": false
+    },
+    "outlook_token_file": {
+      "type": "string",
+      "title": "Token cache file (advanced)",
+      "description": "Path to the cached token file. Defaults to ~/.office-outlook-mcp/token.json.",
+      "required": false
+    },
+    "fetchproxy_ws_host": {
+      "type": "string",
+      "title": "fetchproxy bind address (advanced)",
+      "description": "Bind interface for the fetchproxy concentrator, a literal IP only (default 127.0.0.1). Keep on loopback; it exists for hosted deployments that run each MCP in its own network namespace.",
+      "required": false
+    },
+    "fetchproxy_identity_dir": {
+      "type": "string",
+      "title": "fetchproxy identity directory (advanced)",
+      "description": "Absolute path where the fetchproxy long-term identity keypair is stored (default ~/.fetchproxy/identity/).",
+      "required": false
     }
   },
   "tools": [
