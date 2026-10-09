@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
+import { RequestTimeoutError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerMailTools } from '../src/tools/mail.js';
 import { registerWriteTools } from '../src/tools/writes.js';
@@ -324,6 +325,47 @@ describe('write tools are confirmation-gated', () => {
     );
     expect(res.created).toBe(true);
     expect(res.TimeZone).toBe('Eastern Standard Time');
+    await h.close();
+  });
+
+  it.each([
+    ['outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }, /Sent Items/],
+    ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00', timeZone: 'UTC' }, /calendar/],
+  ] as const)('%s reports a timed-out write as unknown, not as a failure to retry', async (name, args, where) => {
+    // The confirm token is spent by then, and Outlook often accepted the
+    // request (sendmail queues with a 202). A plain error invites the model
+    // to start over — fresh preview, fresh token, a second identical email.
+    const write = vi.fn(async () => {
+      throw new RequestTimeoutError('Outlook', 60_000);
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await confirmedCall(h, name, args);
+    expect(raw.isError).toBeFalsy();
+    const res = parseToolResult<{ status?: string; warning?: string }>(raw);
+    expect(res.status).toBe('unknown');
+    expect(res.warning).toMatch(where);
+    expect(res.warning).toMatch(/before retrying/);
+    expect(write).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('still reports any other send failure as an error', async () => {
+    const write = vi.fn(async () => {
+      throw new Error('400 Bad Request');
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    expect(raw.isError).toBe(true);
+    await h.close();
+  });
+
+  it.each(['outlook_send_mail', 'outlook_create_event'])('%s describes the timeout case', async (name) => {
+    const { client } = stubClient();
+    const h = await harnessFor(registerWriteTools, client);
+    const tool = (await h.listTools()).find((t) => t.name === name);
+    expect(tool?.description).toMatch(/status "unknown"/);
     await h.close();
   });
 
