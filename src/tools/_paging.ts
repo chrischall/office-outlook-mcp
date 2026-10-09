@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { OutlookClient } from '../client.js';
+import type { OutlookClient, QueryParams } from '../client.js';
 import { stripOData } from '../view.js';
 
 /**
@@ -19,14 +19,20 @@ export const nextLinkParam = z
     'Continue a previous listing: pass its `nextLink` value unchanged to fetch the next page. When set, the paging/filter arguments are taken from the link and ignored here.',
   );
 
-/** Fetch the first page at `path`, or the page a previous `nextLink` points at. */
+/**
+ * Fetch the first page at `path` with `query`, or the page a previous
+ * `nextLink` points at. A link already carries its own query, so `query` is
+ * dropped when following one.
+ */
 export function fetchPage<T>(
   client: OutlookClient,
   nextLink: string | undefined,
   path: string,
-  opts: { text?: boolean; prefer?: string } = {},
+  opts: { text?: boolean; prefer?: string; query?: QueryParams } = {},
 ): Promise<T> {
-  return nextLink !== undefined ? client.getAbsolute<T>(nextLink, opts) : client.get<T>(path, opts);
+  if (nextLink === undefined) return client.get<T>(path, opts);
+  const { query: _ignored, ...headerOpts } = opts;
+  return client.getAbsolute<T>(nextLink, headerOpts);
 }
 
 /**

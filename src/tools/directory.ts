@@ -2,18 +2,8 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, viewParam } from '@chrischall/mcp-utils';
 import type { OutlookClient } from '../client.js';
-import { stripOData } from '../view.js';
-import { VIEWS } from './mail.js';
+import { stripOData, VIEWS } from '../view.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
-
-function qs(params: Record<string, string | number | undefined>): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === '') continue;
-    parts.push(`${k}=${encodeURIComponent(String(v))}`);
-  }
-  return parts.length ? `?${parts.join('&')}` : '';
-}
 
 type Page = { value?: Record<string, unknown>[]; '@odata.nextLink'?: string };
 
@@ -62,13 +52,16 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       const data = await fetchPage<Page>(
         client,
         nextLink,
-        `/me/contacts${qs({
-          $top: limit ?? 50,
-          $skip: skip,
-          // `MobilePhone1`, not `MobilePhone`: the latter is the Graph name and
-          // the v2.0 Contact type rejects it outright with a 400.
-          $select: 'Id,DisplayName,EmailAddresses,CompanyName,JobTitle,MobilePhone1',
-        })}`,
+        '/me/contacts',
+        {
+          query: {
+            $top: limit ?? 50,
+            $skip: skip,
+            // `MobilePhone1`, not `MobilePhone`: the latter is the Graph name and
+            // the v2.0 Contact type rejects it outright with a 400.
+            $select: 'Id,DisplayName,EmailAddresses,CompanyName,JobTitle,MobilePhone1',
+          },
+        },
       );
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));
     },
@@ -90,10 +83,13 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       const data = await fetchPage<Page>(
         client,
         nextLink,
-        `/me/people${qs({
-          $top: limit ?? 25,
-          $select: 'Id,DisplayName,ScoredEmailAddresses,JobTitle,CompanyName',
-        })}`,
+        '/me/people',
+        {
+          query: {
+            $top: limit ?? 25,
+            $select: 'Id,DisplayName,ScoredEmailAddresses,JobTitle,CompanyName',
+          },
+        },
       );
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));
     },
@@ -114,10 +110,13 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       const data = await fetchPage<Page>(
         client,
         nextLink,
-        `/me/tasks${qs({
-          $top: limit ?? 50,
-          $select: 'Id,Subject,Status,Importance,DueDateTime,CompletedDateTime',
-        })}`,
+        '/me/tasks',
+        {
+          query: {
+            $top: limit ?? 50,
+            $select: 'Id,Subject,Status,Importance,DueDateTime,CompletedDateTime',
+          },
+        },
       );
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));
     },

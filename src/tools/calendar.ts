@@ -8,22 +8,13 @@ import {
   fullEvent,
   projectCollection,
   type OutlookEvent,
+  VIEWS,
 } from '../view.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
-import { VIEWS } from './mail.js';
 import { mailboxTimeZone } from '../timezone.js';
 
 const EVENT_SELECT =
   'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,OnlineMeeting,BodyPreview';
-
-function qs(params: Record<string, string | number | undefined>): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === '') continue;
-    parts.push(`${k}=${encodeURIComponent(String(v))}`);
-  }
-  return parts.length ? `?${parts.join('&')}` : '';
-}
 
 /**
  * An Outlook `DateTimeTimeZone` for a caller-supplied time.
@@ -118,14 +109,17 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       const data = await fetchPage<{ value?: OutlookEvent[]; '@odata.nextLink'?: string }>(
         client,
         nextLink,
-        `/me/calendarview${qs({
-          startDateTime: start,
-          endDateTime: end,
-          $select: EVENT_SELECT,
-          $orderby: 'Start/DateTime',
-          $top: limit ?? 50,
-        })}`,
-        zone ? { prefer: `outlook.timezone="${zone}"` } : {},
+        '/me/calendarview',
+        {
+          query: {
+            startDateTime: start,
+            endDateTime: end,
+            $select: EVENT_SELECT,
+            $orderby: 'Start/DateTime',
+            $top: limit ?? 50,
+          },
+          ...(zone ? { prefer: `outlook.timezone="${zone}"` } : {}),
+        },
       );
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
@@ -174,7 +168,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       const data = await fetchPage<{
         value?: Record<string, unknown>[];
         '@odata.nextLink'?: string;
-      }>(client, nextLink, `/me/calendars${qs({ $select: 'Id,Name,Color,CanEdit,Owner' })}`);
+      }>(client, nextLink, '/me/calendars', { query: { $select: 'Id,Name,Color,CanEdit,Owner' } });
       if (resolveView(view, VIEWS) === 'raw') return minifiedResult(data);
       return minifiedResult(plainCollection(data));
     },

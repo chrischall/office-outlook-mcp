@@ -7,12 +7,18 @@ import { registerWriteTools } from '../src/tools/writes.js';
 import { registerCalendarTools } from '../src/tools/calendar.js';
 import { registerDirectoryTools } from '../src/tools/directory.js';
 import type { OutlookClient } from '../src/client.js';
+import { buildQueryString } from '@chrischall/mcp-utils';
+
+/** The path a stubbed `get` would put on the wire: path plus its `query` option. */
+const wirePath = (path: string, opts?: { query?: Record<string, unknown> }) =>
+  `${path}${buildQueryString(opts?.query ?? {})}`;
 
 /** A client stub that records calls and returns canned payloads. */
 function stubClient(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: { method: string; path: string; body?: unknown }[] = [];
   const client = {
-    get: vi.fn(async (path: string) => {
+    get: vi.fn(async (p: string, opts?: { query?: Record<string, unknown> }) => {
+      const path = wirePath(p, opts);
       calls.push({ method: 'GET', path });
       if (path.includes('$select=IsRead')) return { IsRead: true };
       if (path.startsWith('/me/messages/') && !path.includes('/attachments')) {
@@ -49,7 +55,7 @@ describe('read tools', () => {
     expect(calls[0].path).toContain('/me/mailfolders/inbox/messages');
     expect(calls[0].path).toContain('ReceivedDateTime%20desc');
     // A listing must not pull Body — that is the whole point of $select here.
-    expect(calls[0].path).not.toContain('Body,');
+    expect(decodeURIComponent(calls[0].path)).not.toContain('Body,');
     await h.close();
   });
 
@@ -78,7 +84,7 @@ describe('read tools', () => {
     await h.callTool('outlook_list_messages', { search: 'quarterly report' });
     expect(calls[0].path).toContain('/me/messages');
     expect(calls[0].path).not.toContain('/mailfolders/');
-    expect(calls[0].path).not.toContain('$orderby');
+    expect(decodeURIComponent(calls[0].path)).not.toContain('$orderby');
     await h.close();
   });
 
@@ -229,9 +235,9 @@ describe('read tools', () => {
     const { client, calls } = stubClient();
     const h = await harnessFor(registerMailTools, client);
     await h.callTool('outlook_list_folders', { parent: 'inbox' });
-    expect(calls[0].path).toBe('/me/mailfolders/inbox/childfolders?$top=50');
+    expect(calls[0].path).toBe('/me/mailfolders/inbox/childfolders?%24top=50');
     await h.callTool('outlook_list_folders', {});
-    expect(calls[1].path).toBe('/me/mailfolders?$top=50');
+    expect(calls[1].path).toBe('/me/mailfolders?%24top=50');
     await h.close();
   });
 
@@ -491,6 +497,8 @@ describe('list tools never truncate silently', () => {
     );
     expect(getAbsolute).toHaveBeenCalledTimes(1);
     expect(getAbsolute.mock.calls[0][0]).toBe(NEXT);
+    // The link carries its own query; the first-page parameters must not ride along.
+    expect(getAbsolute.mock.calls[0][1]).not.toHaveProperty('query');
     // The first-page request is not made at all.
     expect(get.mock.calls.filter(([p]) => p !== '/me/MailboxSettings')).toHaveLength(0);
     expect(res.count).toBe(1);

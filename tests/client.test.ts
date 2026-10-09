@@ -180,6 +180,23 @@ describe('requests', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('builds the query string from the `query` option, skipping unset values', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ value: [] }));
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await c.get('/me/messages', {
+      query: { $top: 5, $skip: undefined, $search: '', $select: 'Id,Subject' },
+    });
+    // mcp-utils' buildQueryString percent-encodes keys too, so `$` goes out as
+    // `%24` — OData servers decode it the same as a literal `$`.
+    expect(String((fetchImpl.mock.calls[0] as never[])[0])).toBe(
+      `${DEFAULT_API_BASE}/me/messages?%24top=5&%24select=Id%2CSubject`,
+    );
+  });
+
   it('carries Prefer options when following a link', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ value: [] }));
     const c = new OutlookClient({

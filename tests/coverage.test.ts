@@ -10,6 +10,16 @@ import { registerCalendarTools } from '../src/tools/calendar.js';
 import { registerMailTools } from '../src/tools/mail.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import type { OutlookClient } from '../src/client.js';
+import { buildQueryString } from '@chrischall/mcp-utils';
+
+/** The nth `get` call as it would go on the wire: path plus its `query` option. */
+function wireUrl(client: OutlookClient, n = 0): string {
+  const [path, opts] = (client.get as ReturnType<typeof vi.fn>).mock.calls[n] as [
+    string,
+    { query?: Record<string, unknown> } | undefined,
+  ];
+  return `${path}${buildQueryString(opts?.query ?? {})}`;
+}
 
 function stub(get: (path: string, opts?: unknown) => Promise<unknown> = async () => ({ value: [] })) {
   return {
@@ -116,10 +126,10 @@ describe('directory tools hit the documented paths', () => {
     const client = stub();
     const h = await createTestHarness((s: McpServer) => registerDirectoryTools(s, client));
     await h.callTool('outlook_list_contacts', { limit: 5, skip: 10 });
-    const p = (client.get as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    // Keys are literal; only values are percent-encoded.
-    expect(p).toContain('$top=5');
-    expect(p).toContain('$skip=10');
+    const p = wireUrl(client);
+    // Built by mcp-utils' buildQueryString, which encodes keys as well as values.
+    expect(p).toContain('%24top=5');
+    expect(p).toContain('%24skip=10');
     await h.close();
   });
 
@@ -176,7 +186,8 @@ describe('calendar tools', () => {
     await h.callTool('outlook_list_events', { start: 'a', end: 'b' });
     const calls = (client.get as ReturnType<typeof vi.fn>).mock.calls;
     const viewCall = calls.find((c: unknown[]) => String(c[0]).includes("/me/calendarview"));
-    expect(viewCall?.[1]).toEqual({});
+    expect(viewCall?.[1]).not.toHaveProperty('prefer');
+    expect(viewCall?.[1]).toHaveProperty('query.startDateTime', 'a');
     await h.close();
   });
 
@@ -218,7 +229,7 @@ describe('mail tools, remaining paths', () => {
     );
     expect(out.count).toBe(1);
     // No bytes: ContentBytes is deliberately excluded via $select.
-    expect((client.get as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('Id%2CName%2CSize%2CContentType');
+    expect(wireUrl(client)).toContain('Id%2CName%2CSize%2CContentType');
     expect(out.items[0]).not.toHaveProperty('ContentBytes');
     await h.close();
   });

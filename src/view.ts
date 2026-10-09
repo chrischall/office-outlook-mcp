@@ -12,6 +12,9 @@
  */
 import { projectOrRaw } from '@chrischall/mcp-utils';
 
+/** The `view` values every read tool accepts; `compact` is the default. */
+export const VIEWS = ['compact', 'full', 'raw'] as const;
+
 /** A `{Name, Address}` pair as Outlook nests it under `EmailAddress`. */
 interface Recipient {
   EmailAddress?: { Name?: string; Address?: string };

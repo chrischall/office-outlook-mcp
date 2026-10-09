@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, viewParam, McpToolError } from '@chrischall/mcp-utils';
-import type { OutlookClient } from '../client.js';
+import type { OutlookClient, QueryParams } from '../client.js';
 import {
   compactFolder,
   compactMessage,
@@ -9,11 +9,10 @@ import {
   projectCollection,
   type OutlookFolder,
   type OutlookMessage,
+  VIEWS,
 } from '../view.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
-
-export const VIEWS = ['compact', 'full', 'raw'] as const;
 
 /**
  * Well-known folder names the API accepts wherever a folder id is taken.
@@ -32,15 +31,6 @@ const WELL_KNOWN = [
 
 /** Fields worth listing. Anything not here costs bytes on every row. */
 const LIST_SELECT = 'Id,Subject,From,ToRecipients,ReceivedDateTime,IsRead,HasAttachments,BodyPreview';
-
-function qs(params: Record<string, string | number | undefined>): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === '') continue;
-    parts.push(`${k}=${encodeURIComponent(String(v))}`);
-  }
-  return parts.length ? `?${parts.join('&')}` : '';
-}
 
 /** `inbox` etc. pass through; anything else is treated as an opaque folder id. */
 function folderSegment(folder: string): string {
@@ -73,7 +63,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       const data = await fetchPage<{ value?: OutlookFolder[]; '@odata.nextLink'?: string }>(
         client,
         nextLink,
-        `${base}${qs({ $top: limit ?? 50 })}`,
+        base,
+        { query: { $top: limit ?? 50 } },
       );
       if (resolveView(view, VIEWS) === 'raw') return minifiedResult(data);
       return minifiedResult(projectCollection(data, compactFolder, 'mail folder'));
@@ -113,7 +104,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       }
       // $search always spans the mailbox; scoping it to a folder is not supported.
       const base = search !== undefined ? '/me/messages' : `/me/mailfolders/${folderSegment(folder ?? 'inbox')}/messages`;
-      const params: Record<string, string | number | undefined> = {
+      const params: QueryParams = {
         $top: limit ?? 25,
         $skip: skip,
         $select: LIST_SELECT,
@@ -128,7 +119,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       const data = await fetchPage<{ value?: OutlookMessage[]; '@odata.nextLink'?: string }>(
         client,
         nextLink,
-        `${base}${qs(params)}`,
+        base,
+        { query: params },
       );
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
@@ -182,9 +174,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       }>(
         client,
         nextLink,
-        `/me/messages/${encodeURIComponent(id)}/attachments${qs({
-          $select: 'Id,Name,Size,ContentType',
-        })}`,
+        `/me/messages/${encodeURIComponent(id)}/attachments`,
+        { query: { $select: 'Id,Name,Size,ContentType' } },
       );
       return minifiedResult(plainCollection(data));
     },
