@@ -221,6 +221,19 @@ describe('read tools', () => {
     await h.close();
   });
 
+  it('lists the child folders of a parent folder', async () => {
+    // /me/mailfolders returns the top level only; Inbox/Receipts lives under
+    // /me/mailfolders/{id}/childfolders, and without a way to reach it the
+    // model cannot list or move to a nested folder at all.
+    const { client, calls } = stubClient();
+    const h = await harnessFor(registerMailTools, client);
+    await h.callTool('outlook_list_folders', { parent: 'inbox' });
+    expect(calls[0].path).toBe('/me/mailfolders/inbox/childfolders?$top=50');
+    await h.callTool('outlook_list_folders', {});
+    expect(calls[1].path).toBe('/me/mailfolders?$top=50');
+    await h.close();
+  });
+
   it('registers the expected read surface', async () => {
     const { client } = stubClient();
     const h = await harnessFor(registerDirectoryTools, client);

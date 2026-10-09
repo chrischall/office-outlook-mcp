@@ -54,19 +54,26 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       description:
         'List mail folders with unread and total counts. Use this to discover folder ids before listing messages; the well-known names (' +
         WELL_KNOWN.join(', ') +
-        ') can be used directly without a lookup.',
+        ') can be used directly without a lookup. Lists ONE level: top-level folders by default, or the child folders of `parent`. A folder with `Children` > 0 has subfolders — list them with `parent` set to its Id.',
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         view: viewParam(VIEWS),
+        parent: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('List the child folders of this folder (id or well-known name). Omit for the top level.'),
         limit: z.number().int().min(1).max(200).optional().describe('Max folders (default 50)'),
         nextLink: nextLinkParam,
       }),
     },
-    async ({ view, limit, nextLink }) => {
+    async ({ view, parent, limit, nextLink }) => {
+      const base =
+        parent !== undefined ? `/me/mailfolders/${folderSegment(parent)}/childfolders` : '/me/mailfolders';
       const data = await fetchPage<{ value?: OutlookFolder[]; '@odata.nextLink'?: string }>(
         client,
         nextLink,
-        `/me/mailfolders${qs({ $top: limit ?? 50 })}`,
+        `${base}${qs({ $top: limit ?? 50 })}`,
       );
       if (resolveView(view, VIEWS) === 'raw') return minifiedResult(data);
       return minifiedResult(projectCollection(data, compactFolder, 'mail folder'));
