@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "build": "tsc && npm run bundle",
-    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --external:dotenv --define:process.env.FETCHPROXY_WS_PORT=undefined --define:process.env.WS_NO_BUFFER_UTIL=true --define:process.env.WS_NO_UTF_8_VALIDATE=true --banner:js='import { createRequire as __createRequire } from \"module\"; const require = __createRequire(import.meta.url);' --outfile=dist/bundle.js",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --external:dotenv --banner:js='import { createRequire as __createRequire } from \"module\"; const require = __createRequire(import.meta.url);' --outfile=dist/bundle.js",
     "dev": "node dist/index.js",
     "test": "npm run typecheck && vitest run",
     "test:watch": "vitest",
@@ -45,7 +45,7 @@
     "typecheck": "tsc -p tsconfig.check.json"
   },
   "dependencies": {
-    "@chrischall/mcp-utils": "^3.0.0",
+    "@chrischall/mcp-utils": "^3.0.1",
     "@fetchproxy/server": "^3.6.0",
     "@modelcontextprotocol/server": "^2.3.0",
     "dotenv": "^18.0.1",
