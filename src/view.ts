@@ -16,20 +16,41 @@ import { projectOrRaw } from '@chrischall/mcp-utils';
 export const VIEWS = ['compact', 'full', 'raw'] as const;
 
 /** A `{Name, Address}` pair as Outlook nests it under `EmailAddress`. */
-interface Recipient {
+export interface Recipient {
   EmailAddress?: { Name?: string; Address?: string };
 }
 
-function addr(r: Recipient | undefined): string | undefined {
+export function addr(r: Recipient | undefined): string | undefined {
   const e = r?.EmailAddress;
   if (!e) return undefined;
   if (e.Name && e.Address && e.Name !== e.Address) return `${e.Name} <${e.Address}>`;
   return e.Address ?? e.Name;
 }
 
-function addrs(list: Recipient[] | undefined): string[] | undefined {
+export function addrs(list: Recipient[] | undefined): string[] | undefined {
   if (!Array.isArray(list) || list.length === 0) return undefined;
   return list.map((r) => addr(r)).filter((s): s is string => s !== undefined);
+}
+
+/**
+ * The most addresses a recipient list returns. One live invite went to 1,132
+ * people (2026-10-10); listing them all costs a great deal of context and
+ * tells an agent nothing the count does not.
+ */
+export const MAX_RECIPIENTS = 20;
+
+/**
+ * `{ [key]: the first MAX_RECIPIENTS }`, plus `[key]Count` (the full length)
+ * and `[key]Truncated: true` when the list was longer. Absent keys stay
+ * undefined so a projection's pruning drops them.
+ */
+export function cappedRecipients(key: string, list: string[] | undefined): Record<string, unknown> {
+  if (list === undefined || list.length <= MAX_RECIPIENTS) return { [key]: list };
+  return {
+    [key]: list.slice(0, MAX_RECIPIENTS),
+    [`${key}Count`]: list.length,
+    [`${key}Truncated`]: true,
+  };
 }
 
 export interface OutlookMessage {
@@ -58,7 +79,7 @@ export function compactMessage(m: OutlookMessage): Record<string, unknown> {
     Id: m.Id,
     Subject: m.Subject,
     From: addr(m.From ?? m.Sender),
-    To: addrs(m.ToRecipients),
+    ...cappedRecipients('To', addrs(m.ToRecipients)),
     Received: m.ReceivedDateTime,
     IsRead: m.IsRead,
     HasAttachments: m.HasAttachments || undefined,
@@ -72,7 +93,7 @@ export function compactMessage(m: OutlookMessage): Record<string, unknown> {
 export function fullMessage(m: OutlookMessage): Record<string, unknown> {
   return pruned({
     ...compactMessage(m),
-    Cc: addrs(m.CcRecipients),
+    ...cappedRecipients('Cc', addrs(m.CcRecipients)),
     Sent: m.SentDateTime,
     Importance: m.Importance,
     IsDraft: m.IsDraft,
@@ -101,8 +122,25 @@ export interface OutlookEvent {
   OnlineMeeting?: { JoinUrl?: string } | null;
   BodyPreview?: string;
   WebLink?: string;
+  /** True on an event the signed-in user organizes (their own appointments included). */
+  IsOrganizer?: boolean;
+  /** The signed-in user's answer: None, Organizer, TentativelyAccepted, Accepted, Declined, NotResponded. */
+  ResponseStatus?: { Response?: string };
+  ResponseRequested?: boolean;
+  /** SingleInstance, Occurrence, Exception or SeriesMaster. */
+  Type?: string;
+  /** On an Occurrence or Exception: the Id of its series. */
+  SeriesMasterId?: string;
 }
 
+/**
+ * Projection of an event. The decision fields — your response, whether you
+ * organize it, whether it is one occurrence of a series, how it shows on your
+ * calendar — are in BOTH views: live 2026-10-10, an agent clearing out-of-office
+ * days could not tell its own appointment from an invite it had not answered
+ * without them. Their booleans are kept when false, since "not the organizer"
+ * is the answer the agent is looking for.
+ */
 export function compactEvent(e: OutlookEvent): Record<string, unknown> {
   return pruned({
     Id: e.Id,
@@ -112,15 +150,20 @@ export function compactEvent(e: OutlookEvent): Record<string, unknown> {
     TimeZone: e.Start?.TimeZone,
     Location: e.Location?.DisplayName || undefined,
     Organizer: addr(e.Organizer),
-    IsAllDay: e.IsAllDay || undefined,
-    IsCancelled: e.IsCancelled || undefined,
+    IsAllDay: e.IsAllDay,
+    IsCancelled: e.IsCancelled,
+    IsOrganizer: e.IsOrganizer,
+    MyResponse: e.ResponseStatus?.Response,
+    ResponseRequested: e.ResponseRequested,
+    Type: e.Type,
+    ShowAs: e.ShowAs,
   });
 }
 
 export function fullEvent(e: OutlookEvent): Record<string, unknown> {
   return pruned({
     ...compactEvent(e),
-    ShowAs: e.ShowAs,
+    SeriesMasterId: e.SeriesMasterId,
     Attendees: e.Attendees?.map((a) =>
       pruned({ Who: addr(a), Response: a.Status?.Response }),
     ),

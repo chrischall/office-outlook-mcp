@@ -19,6 +19,16 @@ function stubClient() {
       calls.push({ method: 'GET', path });
       if (path.includes('MailboxSettings')) return { TimeZone: 'Eastern Standard Time' };
       if (path.includes('$select=IsRead')) return { IsRead: true };
+      // A meeting you organize, with attendees: deleting it sends a cancellation.
+      if (path.startsWith('/me/events/org-1')) {
+        return {
+          Id: 'org-1',
+          Subject: 's',
+          IsOrganizer: true,
+          Type: 'SingleInstance',
+          Attendees: [{ EmailAddress: { Address: 'a@example.com' } }],
+        };
+      }
       return { value: [] };
     }),
     write: vi.fn(async (method: string, path: string, body?: unknown) => {
@@ -74,6 +84,9 @@ const gated = [
     '/me/events',
   ],
   ['outlook_update_event', { id: 'e1', subject: 's' }, 'PATCH', '/me/events/e1'],
+  ['outlook_respond_to_invite', { eventId: 'e1', response: 'accept' }, 'POST', '/me/events/e1/accept'],
+  ['outlook_reply', { messageId: 'm1', mode: 'reply', comment: 'c' }, 'POST', '/me/messages/m1/reply'],
+  ['outlook_update_message', { messageIds: ['m1'], flag: 'flagged' }, 'PATCH', '/me/messages/m1'],
 ] as const;
 
 describe('every write tool is gated by a confirm token', () => {
@@ -99,11 +112,32 @@ describe('every write tool is gated by a confirm token', () => {
     await h.close();
   });
 
+  it('outlook_delete_event: phase 1 previews and deletes nothing; phase 2 deletes once', async () => {
+    // A DELETE has no body, so the generic table above (which compares the
+    // written body with willSend) does not fit it.
+    const { client, writes } = stubClient();
+    const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
+
+    const first = parseToolResult<PhaseOne>(await h.callTool('outlook_delete_event', { id: 'org-1' }));
+    expect(first.status).toBe('confirmation-required');
+    expect(first.dispatched).toBe(false);
+    expect(first.confirmToken).toEqual(expect.any(String));
+    expect(first.preview?.method).toBe('DELETE');
+    expect(first.preview?.path).toBe('/me/events/org-1');
+    expect(first.preview?.action).toEqual(expect.any(String));
+    expect(writes()).toHaveLength(0);
+
+    const second = await h.callTool('outlook_delete_event', { id: 'org-1', confirmToken: first.confirmToken });
+    expect(second.isError).toBeFalsy();
+    expect(writes()).toEqual([{ method: 'DELETE', path: '/me/events/org-1', body: undefined }]);
+    await h.close();
+  });
+
   it('exposes confirmToken and no confirm parameter', async () => {
     const { client } = stubClient();
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const { tools } = await h.client.listTools();
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(10);
     for (const tool of tools) {
       const props = tool.inputSchema.properties ?? {};
       expect(props).toHaveProperty('confirmToken');

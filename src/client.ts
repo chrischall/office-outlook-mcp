@@ -9,6 +9,8 @@
 import {
   createApiClient,
   decodeJwtExp,
+  errorKindOf,
+  errorStatusOf,
   McpToolError,
   parseBoolEnv,
   readEnvVar,
@@ -86,6 +88,17 @@ export interface OutlookClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * Whether `e` is about the credential rather than the request: no token
+ * configured, or Outlook refusing the one it was sent. Such a failure is the
+ * same for every call that follows, so a batch tool stops on it instead of
+ * reporting it once per item.
+ */
+export function isCredentialFailure(e: unknown): boolean {
+  const kind = errorKindOf(e);
+  return kind === 'no_credential' || kind === 'credential_rejected' || errorStatusOf(e) === 401;
+}
+
 export class OutlookClient {
   readonly #baseUrl: string;
   /**
@@ -122,6 +135,7 @@ export class OutlookClient {
           hint:
             'Set OUTLOOK_ACCESS_TOKEN, or unset OUTLOOK_DISABLE_FETCHPROXY so the ' +
             'token can be captured from a signed-in Outlook browser tab.',
+          kind: 'no_credential',
         },
       );
     }
@@ -162,6 +176,8 @@ export class OutlookClient {
               'A directly-supplied token cannot be refreshed automatically. Replace ' +
               'OUTLOOK_ACCESS_TOKEN with a current one, or unset it to capture from a ' +
               'signed-in Outlook browser tab instead.',
+            status: 401,
+            kind: 'credential_rejected',
           });
         }
         return toBearerTokens(await this.#capture());
@@ -208,6 +224,8 @@ export class OutlookClient {
           hint:
             'The token has expired or been revoked. Open a signed-in Outlook tab ' +
             'and retry — the next call re-captures automatically.',
+          status: 401,
+          kind: 'credential_rejected',
         }),
     });
     return this.#api;

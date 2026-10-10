@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.chrischall/office-outlook-mcp",
-  "description": "Outlook / Microsoft 365 for Claude — mail, calendar, contacts and tasks, with confirm-gated sending",
+  "description": "Outlook / Microsoft 365 for Claude — triage mail, reply, answer invites and book meetings, confirmed",
   "repository": {
     "url": "https://github.com/chrischall/office-outlook-mcp",
     "source": "github"

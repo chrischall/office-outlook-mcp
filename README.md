@@ -107,46 +107,101 @@ Everything is optional — with nothing set, the server captures from the browse
 ## Tools
 
 **Read** — `outlook_list_folders`, `outlook_list_messages`,
-`outlook_get_message`, `outlook_list_attachments`, `outlook_list_events`,
-`outlook_get_event`, `outlook_list_calendars`, `outlook_find_meeting_times`,
+`outlook_get_message`, `outlook_get_unread`, `outlook_list_attachments`,
+`outlook_get_attachment`, `outlook_list_events`, `outlook_get_event`,
+`outlook_list_calendars`, `outlook_find_meeting_times`,
 `outlook_get_schedule`, `outlook_get_profile`,
 `outlook_get_mailbox_settings`, `outlook_list_contacts`, `outlook_list_people`,
-`outlook_list_tasks`
+`outlook_list_categories`, `outlook_list_tasks`
 
-**Write** (all ask you to confirm first — see [Confirmations](#confirmations)) — `outlook_send_mail`,
-`outlook_create_draft`, `outlook_mark_read`, `outlook_move_message`,
-`outlook_create_event`, `outlook_update_event`
+**Write** (ask you to confirm first — see [Confirmations](#confirmations)) —
+`outlook_send_mail`, `outlook_create_draft`, `outlook_mark_read`,
+`outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
+`outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
+`outlook_reply`.
+Three skip the confirmation when nothing reaches anyone else:
+`outlook_reply` with `draftOnly: true` (the reply stays in Drafts),
+`outlook_respond_to_invite` with `sendResponse: false`, and
+`outlook_delete_event` on your own appointment with no attendees or on a
+meeting the organizer already cancelled (in each, only your calendar
+changes).
 
 **Meetings** — `outlook_find_meeting_times` asks Outlook's Scheduling
 Assistant for slots when everyone is free, and `outlook_get_schedule` shows
-each person's busy blocks. `outlook_create_event` and `outlook_update_event`
-attach a Microsoft Teams meeting by default and return its join link; pass
-`teamsMeeting: false` to leave it off. Only the organizer can update a
-meeting.
+each person's busy blocks. Each suggested slot carries `createEventArgs`,
+which `outlook_create_event` accepts unchanged. `outlook_create_event` and
+`outlook_update_event` attach a Microsoft Teams meeting by default and return
+its join link; pass `teamsMeeting: false` to leave it off. Only the organizer
+can update a meeting. `outlook_respond_to_invite` accepts, tentatively accepts
+or declines an invite, by its message id or its event id.
+`outlook_delete_event` deletes an event you organize — one occurrence by the
+occurrence's id, or the whole series by its series master's id — and sends
+any attendees a cancellation; for an invite you received it refuses and points
+you at declining instead. `outlook_list_events` and `outlook_get_event` show
+what that decision needs in every view: `MyResponse`, `ResponseRequested`,
+`IsOrganizer`, `IsCancelled`, `Type` (SingleInstance, Occurrence, Exception or
+SeriesMaster), `ShowAs` and `IsAllDay`, plus `SeriesMasterId` in the full view.
 
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
-Mutating tools **write nothing** until you confirm — see
-[Confirmations](#confirmations). The preview shows exactly what would be sent
+Mutating tools **write nothing** until you confirm (bar the cases above)
+— see [Confirmations](#confirmations). The preview shows exactly what would be sent
 (action, method, path and body). (`outlook_create_event` first reads the
 mailbox time zone, so its preview can name the zone it would book in; that is
 the one read a preview makes.)
 
 Mail and event text is written by other people, so `outlook_list_messages`,
-`outlook_get_message`, `outlook_list_events` and `outlook_get_event` wrap every
-result (all views) in an untrusted-content envelope — `untrusted_content: true`
-plus a `note` telling the model to treat the text as data, never instructions
-(a `view: raw` record that carries its own `untrusted_content`/`note` key is
-nested under `data`, so it cannot overwrite the envelope).
+`outlook_get_message`, `outlook_get_unread`, `outlook_get_attachment`,
+`outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times` and
+`outlook_get_schedule` wrap every result (all views) in an untrusted-content
+envelope — `untrusted_content: true` plus a `note` telling the model to treat
+the text as data, never instructions (a `view: raw` record that carries its
+own `untrusted_content`/`note` key is nested under `data`, so it cannot
+overwrite the envelope). `outlook_reply` returns a sent reply's subject — the
+original sender's text — inside the same envelope.
 On a client that cannot show a confirmation prompt, the confirmToken is still
 something the model passes back itself, so keep `MCP_CONFIRM_MODE=ask-user`
 (the default) and approve each preview in chat — or use a client that asks you
 before running non-read-only tools — as the real guard on outbound sends.
 
+## Triage loop
+
+An agent can work through new mail end to end without opening Outlook:
+
+1. **Read the batch** — `outlook_get_unread` returns the unread messages in a
+   folder (default inbox), newest first, each with its plain-text body, in one
+   call. It does **not** mark anything read. Each item has a `kind`: `mail`,
+   `meetingRequest`, `meetingCancelled` or `meetingResponse`; requests and
+   cancellations also carry the linked `event` (time, organizer, your current
+   response) — or, when the meeting is no longer on your calendar (already
+   declined, cancelled or deleted), a `hint` saying there is nothing to respond
+   to. `to` and `cc` list at most 20 addresses, with `toCount`/`ccCount` when
+   there are more.
+2. **Act on each item** —
+   - an invite: `outlook_respond_to_invite` with the message id and
+     `accept`, `tentative` or `decline` (and an optional comment);
+   - a message that needs an answer: `outlook_reply` (`reply`, `replyAll` or
+     `forward`), or `draftOnly: true` to leave it in Drafts for you to review;
+   - a request for a meeting: `outlook_find_meeting_times` for the attendees,
+     then pass the chosen slot's `createEventArgs` to `outlook_create_event`;
+   - an attachment to read: `outlook_get_attachment`.
+3. **File it** — `outlook_update_message` flags, categorises (names from
+   `outlook_list_categories`) and marks read up to 50 messages in one call;
+   `outlook_move_message` moves one to another folder.
+4. **Mark it handled** — `outlook_mark_read` (or `isRead: true` on
+   `outlook_update_message`), so the next `outlook_get_unread` returns only
+   what is still new.
+
+Replies, forwards, invite responses and new meetings reach other people, so
+each asks you to confirm first — except a reply saved with `draftOnly: true`
+(it stays in Drafts until you send it) and an invite response with
+`sendResponse: false` (only your calendar changes; the organizer is not told).
+
 ## Confirmations
 
-Every write asks you to confirm before anything is sent or changed. A client
+Every write asks you to confirm before anything is sent or changed (except a
+draft-only reply and a silent invite response — see [Tools](#tools)). A client
 that can show a confirmation prompt (Claude Code) shows one. On a client that
 cannot, the first call does nothing and returns a `confirmation-required`
 preview plus a `confirmToken`; only a repeat call with that token performs the

@@ -14,7 +14,7 @@
       "name": "office-outlook-mcp",
       "displayName": "Outlook (Microsoft 365)",
       "source": "./",
-      "description": "MCP server for Outlook / Microsoft 365 — read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
+      "description": "MCP server for Outlook / Microsoft 365 — triage unread mail, reply, answer meeting invites and schedule meetings, plus folders, calendar, contacts and tasks, with confirmation before anything is sent",
       "version": "0.4.1",
       "author": {
         "name": "Chris Hall"

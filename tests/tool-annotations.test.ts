@@ -38,7 +38,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(21);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(28);
   });
 
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {
@@ -76,10 +76,17 @@ describe('tool annotations', () => {
     expect(destructive('outlook_send_mail')).toBe(true);
     expect(destructive('outlook_create_event')).toBe(true);
     expect(destructive('outlook_update_event')).toBe(true);
+    expect(destructive('outlook_reply')).toBe(true);
+    // Nothing restores a deleted event, and attendees are sent a cancellation.
+    expect(destructive('outlook_delete_event')).toBe(true);
     // No tool in this set deletes a draft, so nothing restores the prior state.
     expect(destructive('outlook_create_draft')).toBe(true);
     // Self-inverse: mark_read(isRead: !x) and move_message back to the old folder.
     expect(destructive('outlook_mark_read')).toBe(false);
     expect(destructive('outlook_move_message')).toBe(false);
+    // Flag, categories and read state can each be set back to what they were.
+    expect(destructive('outlook_update_message')).toBe(false);
+    // A response can be changed by responding again; nothing is deleted.
+    expect(destructive('outlook_respond_to_invite')).toBe(false);
   });
 });

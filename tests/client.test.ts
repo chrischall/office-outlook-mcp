@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
-import { OutlookClient, DEFAULT_API_BASE } from '../src/client.js';
+import { OutlookClient, DEFAULT_API_BASE, isCredentialFailure } from '../src/client.js';
 import { stripBearer, raceCaptures } from '../src/auth-fetchproxy.js';
 
 /** A JWT whose `exp` is `secondsFromNow` out. Signature is irrelevant here. */
@@ -292,6 +292,23 @@ describe('token lifecycle', () => {
     });
     await expect(c.get('/me')).rejects.toThrow();
     expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('marks its credential errors so batch tools can stop on them, but not an ordinary HTTP error', async () => {
+    const unconfigured = new OutlookClient({ env: env({ OUTLOOK_DISABLE_FETCHPROXY: '1' }) });
+    expect(isCredentialFailure(await unconfigured.get('/me').catch((e: unknown) => e))).toBe(true);
+
+    const rejected = new OutlookClient({
+      env: env({ OUTLOOK_ACCESS_TOKEN: 'opaque-not-a-jwt' }),
+      fetchImpl: (async () => jsonResponse({ error: 'nope' }, 401)) as unknown as typeof fetch,
+    });
+    expect(isCredentialFailure(await rejected.get('/me').catch((e: unknown) => e))).toBe(true);
+
+    const missing = new OutlookClient({
+      env: env({ OUTLOOK_ACCESS_TOKEN: 'opaque-not-a-jwt' }),
+      fetchImpl: (async () => jsonResponse({ error: 'gone' }, 404)) as unknown as typeof fetch,
+    });
+    expect(isCredentialFailure(await missing.get('/me').catch((e: unknown) => e))).toBe(false);
   });
 });
 

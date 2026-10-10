@@ -5,6 +5,7 @@ import {
   compactMessage,
   fullEvent,
   fullMessage,
+  MAX_RECIPIENTS,
   projectCollection,
   VIEWS,
 } from '../src/view.js';
@@ -66,6 +67,31 @@ describe('message projection', () => {
   });
 });
 
+describe('recipient cap', () => {
+  const crowd = Array.from({ length: 1132 }, (_, i) => ({ EmailAddress: { Address: `u${i}@example.com` } }));
+
+  it('keeps at most MAX_RECIPIENTS of To and Cc, with the full count', () => {
+    expect(MAX_RECIPIENTS).toBe(20);
+    const f = fullMessage({ ...message, ToRecipients: crowd, CcRecipients: crowd.slice(0, 21) });
+    expect(f.To).toHaveLength(20);
+    expect(f.ToCount).toBe(1132);
+    expect(f.ToTruncated).toBe(true);
+    expect(f.Cc).toHaveLength(20);
+    expect(f.CcCount).toBe(21);
+    expect(f.CcTruncated).toBe(true);
+    const c = compactMessage({ ...message, ToRecipients: crowd });
+    expect(c.To).toHaveLength(20);
+    expect(c.ToCount).toBe(1132);
+  });
+
+  it('adds no count to a list of exactly MAX_RECIPIENTS', () => {
+    const f = fullMessage({ ...message, ToRecipients: crowd.slice(0, 20) });
+    expect(f.To).toHaveLength(20);
+    expect(f).not.toHaveProperty('ToCount');
+    expect(f).not.toHaveProperty('ToTruncated');
+  });
+});
+
 describe('event projection', () => {
   const event = {
     Id: 'e1',
@@ -91,6 +117,55 @@ describe('event projection', () => {
   it('adds attendee responses only in the full view', () => {
     expect(compactEvent(event)).not.toHaveProperty('Attendees');
     expect(fullEvent(event).Attendees).toEqual([{ Who: 'e@x.y', Response: 'Accepted' }]);
+  });
+
+  // Live 2026-10-10 (clearing OOO days): without these an agent could not
+  // tell its own appointment from an invite it had not answered, or one
+  // occurrence from the whole series.
+  const occurrence = {
+    ...event,
+    ResponseStatus: { Response: 'NotResponded', Time: '0001-01-01T00:00:00Z' },
+    ResponseRequested: true,
+    IsOrganizer: false,
+    IsCancelled: false,
+    IsAllDay: false,
+    Type: 'Occurrence',
+    SeriesMasterId: 'master-1',
+    ShowAs: 'Tentative',
+  };
+
+  it('carries the decision fields in the compact view, false values included', () => {
+    expect(compactEvent(occurrence)).toMatchObject({
+      MyResponse: 'NotResponded',
+      ResponseRequested: true,
+      IsOrganizer: false,
+      IsCancelled: false,
+      IsAllDay: false,
+      Type: 'Occurrence',
+      ShowAs: 'Tentative',
+    });
+    // The series link is for the full view; compact stays compact.
+    expect(compactEvent(occurrence)).not.toHaveProperty('SeriesMasterId');
+  });
+
+  it('carries the decision fields and the series link in the full view', () => {
+    expect(fullEvent(occurrence)).toMatchObject({
+      MyResponse: 'NotResponded',
+      ResponseRequested: true,
+      IsOrganizer: false,
+      IsCancelled: false,
+      IsAllDay: false,
+      Type: 'Occurrence',
+      SeriesMasterId: 'master-1',
+      ShowAs: 'Tentative',
+    });
+  });
+
+  it('marks your own meeting as organizer and leaves out what Outlook did not send', () => {
+    const own = compactEvent({ Id: 'e2', IsOrganizer: true, ResponseStatus: { Response: 'Organizer' } });
+    expect(own).toMatchObject({ IsOrganizer: true, MyResponse: 'Organizer' });
+    expect(own).not.toHaveProperty('Type');
+    expect(own).not.toHaveProperty('ResponseRequested');
   });
 });
 

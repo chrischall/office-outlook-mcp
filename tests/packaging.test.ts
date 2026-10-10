@@ -178,28 +178,34 @@ describe('publish scaffold', () => {
   });
 });
 
+/** Every tool the server registers, with its published description. */
+async function registeredTools(): Promise<{ name: string; description?: string }[]> {
+  const client = {
+    get: async () => ({ value: [] }),
+    write: async () => ({}),
+    refreshTokenIfNeeded: async () => {},
+    tokenExpiresAt: () => null,
+    tokenSource: 'test',
+    apiBase: 'https://outlook.office.com/api/v2.0',
+  } as unknown as OutlookClient;
+
+  const h = await createTestHarness((server: McpServer) => {
+    registerMailTools(server, client);
+    registerCalendarTools(server, client);
+    registerDirectoryTools(server, client);
+    registerWriteTools(server, client);
+    registerHealthcheckTool(server, client);
+  });
+  const tools = await h.listTools();
+  await h.close();
+  return tools;
+}
+
 describe('manifest tool roster', () => {
   it('matches the registered tools in BOTH directions', async () => {
     // A tool missing from manifest.json is invisible to an mcpb host even
     // though the server answers it, and nothing else reads that file.
-    const client = {
-      get: async () => ({ value: [] }),
-      write: async () => ({}),
-      refreshTokenIfNeeded: async () => {},
-      tokenExpiresAt: () => null,
-      tokenSource: 'test',
-      apiBase: 'https://outlook.office.com/api/v2.0',
-    } as unknown as OutlookClient;
-
-    const h = await createTestHarness((server: McpServer) => {
-      registerMailTools(server, client);
-      registerCalendarTools(server, client);
-      registerDirectoryTools(server, client);
-      registerWriteTools(server, client);
-      registerHealthcheckTool(server, client);
-    });
-    const registered = (await h.listTools()).map((t) => t.name).sort();
-    await h.close();
+    const registered = (await registeredTools()).map((t) => t.name).sort();
 
     const declared = read('manifest.json').tools.map((t: { name: string }) => t.name).sort();
     expect(declared).toEqual(registered);
@@ -224,5 +230,48 @@ describe('host lists', () => {
     const profileAdd = skill.match(/fpx profile add outlook(?:[^\n]*\\\n)*[^\n]*/)![0];
     const domains = [...profileAdd.matchAll(/--domain (\S+)/g)].map((m) => m[1]);
     expect(domains.sort()).toEqual([...CAPTURE_HOSTS].sort());
+  });
+});
+
+describe('README tool docs', () => {
+  const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  const section = (heading: string) => readme.split(`\n## ${heading}\n`)[1]?.split(/\n## /)[0] ?? '';
+  const named = (text: string) => new Set([...text.matchAll(/`(outlook_[a-z_]+)`/g)].map((m) => m[1]));
+
+  it('names every registered tool under Tools, and no tool that does not exist', async () => {
+    // The README is where a person decides whether to install; a tool that
+    // ships undocumented may as well not exist, and a stale name misleads.
+    const registered = (await registeredTools()).map((t) => t.name).sort();
+    expect([...named(section('Tools'))].sort()).toEqual(registered);
+  });
+
+  it('documents the triage loop end to end', () => {
+    // The loop an agent runs over new mail: read the batch, act on each item
+    // (answer an invite, reply, schedule a follow-up), file it, mark it read.
+    const loop = named(section('Triage loop'));
+    for (const tool of [
+      'outlook_get_unread',
+      'outlook_respond_to_invite',
+      'outlook_reply',
+      'outlook_find_meeting_times',
+      'outlook_create_event',
+      'outlook_update_message',
+      'outlook_mark_read',
+    ]) {
+      expect(loop, `${tool} missing from the triage loop`).toContain(tool);
+    }
+  });
+
+  it('lists every tool that wraps third-party text in the untrusted envelope', async () => {
+    // Read off the registered descriptions, so a new tool that wraps its
+    // result cannot be left out of the paragraph that tells people it does.
+    const { UNTRUSTED_DESCRIPTION_SUFFIX } = await import('../src/tools/_untrusted.js');
+    const wrapping = (await registeredTools())
+      .filter((t) => t.description?.includes(UNTRUSTED_DESCRIPTION_SUFFIX))
+      .map((t) => t.name);
+    expect(wrapping.length).toBeGreaterThan(0);
+    const paragraph = readme.split('\n\n').find((p) => /untrusted-content\s+envelope/.test(p)) ?? '';
+    const listed = named(paragraph);
+    for (const tool of wrapping) expect(listed, `${tool} wraps but is not listed`).toContain(tool);
   });
 });

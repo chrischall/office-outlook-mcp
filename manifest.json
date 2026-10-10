@@ -4,7 +4,7 @@
   "name": "office-outlook-mcp",
   "display_name": "Outlook (Microsoft 365)",
   "version": "0.4.1",
-  "description": "Outlook / Microsoft 365 for Claude — read mail, folders, calendar, contacts and tasks, and send mail with confirmation",
+  "description": "Outlook / Microsoft 365 for Claude — triage unread mail, reply, answer meeting invites and schedule meetings, plus folders, calendar, contacts and tasks, with confirmation before anything is sent",
   "author": {
     "name": "Chris Chall",
     "email": "chris.c.hall@gmail.com",
@@ -116,8 +116,16 @@
       "description": "Get one message including its body"
     },
     {
+      "name": "outlook_get_unread",
+      "description": "Triage batch: unread messages with text bodies and invite events in one call"
+    },
+    {
       "name": "outlook_list_attachments",
       "description": "List a message's attachments"
+    },
+    {
+      "name": "outlook_get_attachment",
+      "description": "Get one attachment: images as image content, text-like files decoded, other binaries as metadata"
     },
     {
       "name": "outlook_list_events",
@@ -156,6 +164,10 @@
       "description": "List people ranked by relevance"
     },
     {
+      "name": "outlook_list_categories",
+      "description": "List the mailbox's categories and their colours"
+    },
+    {
       "name": "outlook_list_tasks",
       "description": "List Outlook tasks"
     },
@@ -172,6 +184,10 @@
       "description": "Mark a message read or unread (asks you to confirm first)"
     },
     {
+      "name": "outlook_update_message",
+      "description": "Flag, categorise or mark read up to 50 messages at once (asks you to confirm first)"
+    },
+    {
       "name": "outlook_move_message",
       "description": "Move a message to another folder (asks you to confirm first)"
     },
@@ -182,6 +198,18 @@
     {
       "name": "outlook_update_event",
       "description": "Update a meeting you organize, adding Teams if missing (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_respond_to_invite",
+      "description": "Accept, tentatively accept or decline a meeting invite (asks you to confirm first when the organizer is notified)"
+    },
+    {
+      "name": "outlook_delete_event",
+      "description": "Delete an event, one occurrence or a whole series you organize (asks you to confirm first when attendees are sent a cancellation)"
+    },
+    {
+      "name": "outlook_reply",
+      "description": "Reply, reply-all or forward a message, or save it as a draft (asks you to confirm first when sending)"
     },
     {
       "name": "outlook_healthcheck",

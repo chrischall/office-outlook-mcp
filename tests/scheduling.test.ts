@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerCalendarTools } from '../src/tools/calendar.js';
+import { createEventInput, registerWriteTools } from '../src/tools/writes.js';
 import type { OutlookClient } from '../src/client.js';
 
 /** Shapes below are trimmed from live responses captured 2026-10-08. */
@@ -147,6 +148,13 @@ describe('outlook_find_meeting_times', () => {
         Organizer: 'Free',
         Attendees: { 'a@x.test': 'Free', 'b@x.test': 'Tentative' },
         Reason: 'Suggested because it is one of the nearest times when all attendees are available.',
+        createEventArgs: {
+          start: '2026-10-12T09:00:00',
+          end: '2026-10-12T09:30:00',
+          timeZone: 'Eastern Standard Time',
+          attendees: ['a@x.test'],
+          optionalAttendees: ['b@x.test'],
+        },
       },
     ]);
     await h.close();
@@ -170,6 +178,10 @@ describe('outlook_find_meeting_times', () => {
       await h.callTool('outlook_find_meeting_times', { ...args, view: 'raw' }),
     );
     expect(res.MeetingTimeSuggestions).toHaveLength(1);
+    expect(JSON.stringify(res)).not.toContain('createEventArgs');
+    // …and the description says so, so nobody asks for raw expecting both.
+    const tool = (await h.listTools()).find((t) => t.name === 'outlook_find_meeting_times');
+    expect(tool?.description).toMatch(/view: ?'raw'.*createEventArgs|createEventArgs.*view: ?'raw'/);
     await h.close();
   });
 
@@ -200,6 +212,99 @@ describe('outlook_find_meeting_times', () => {
     expect(res.isError).toBe(true);
     expect(client.post).not.toHaveBeenCalled();
     await h.close();
+  });
+});
+
+describe('find a time, then book it', () => {
+  const args = {
+    attendees: ['a@x.test'],
+    optionalAttendees: ['b@x.test'],
+    start: '2026-10-12T09:00:00',
+    end: '2026-10-16T17:00:00',
+    durationMinutes: 30,
+  };
+
+  async function suggestionArgs(extra: Record<string, unknown> = {}) {
+    const h = await harness(stub(async () => SUGGESTIONS));
+    const res = parseToolResult<{ suggestions: { createEventArgs: Record<string, unknown> }[] }>(
+      await h.callTool('outlook_find_meeting_times', { ...args, ...extra }),
+    );
+    await h.close();
+    return res.suggestions[0].createEventArgs;
+  }
+
+  it("hands back createEventArgs that outlook_create_event's schema accepts as-is", async () => {
+    const createArgs = await suggestionArgs({ subject: 'Planning' });
+    expect(createArgs).toEqual({
+      subject: 'Planning',
+      start: '2026-10-12T09:00:00',
+      end: '2026-10-12T09:30:00',
+      timeZone: 'Eastern Standard Time',
+      attendees: ['a@x.test'],
+      optionalAttendees: ['b@x.test'],
+    });
+    // strict(): no key the create tool would silently drop.
+    expect(createEventInput.strict().parse(createArgs)).toEqual(createArgs);
+  });
+
+  it('books exactly the suggested slot when fed to outlook_create_event', async () => {
+    const createArgs = await suggestionArgs({ subject: 'Planning' });
+    const writes: { method: string; path: string; body?: unknown }[] = [];
+    const client = {
+      get: vi.fn(async () => ({ TimeZone: 'Eastern Standard Time' })),
+      write: vi.fn(async (method: string, path: string, body?: unknown) => {
+        writes.push({ method, path, body });
+        return { Id: 'new-1', OnlineMeeting: { JoinUrl: 'https://teams.example.test/j' } };
+      }),
+    } as unknown as OutlookClient;
+    const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
+    // The confirm gate still stands between the suggestion and the invite.
+    const first = parseToolResult<{ confirmToken?: string }>(
+      await h.callTool('outlook_create_event', createArgs),
+    );
+    expect(writes).toHaveLength(0);
+    await h.callTool('outlook_create_event', { ...createArgs, confirmToken: first.confirmToken });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].body).toMatchObject({
+      Subject: 'Planning',
+      Start: { DateTime: '2026-10-12T09:00:00', TimeZone: 'Eastern Standard Time' },
+      End: { DateTime: '2026-10-12T09:30:00', TimeZone: 'Eastern Standard Time' },
+      Attendees: [
+        { Type: 'Required', EmailAddress: { Address: 'a@x.test' } },
+        { Type: 'Optional', EmailAddress: { Address: 'b@x.test' } },
+      ],
+    });
+    await h.close();
+  });
+
+  it('leaves subject for the caller to add when none was given', async () => {
+    const createArgs = await suggestionArgs();
+    expect(createArgs).not.toHaveProperty('subject');
+    expect(createEventInput.strict().parse({ ...createArgs, subject: 'Planning' })).toMatchObject(createArgs);
+  });
+
+  it('omits createEventArgs from a slot Outlook returned without times', async () => {
+    const h = await harness(
+      stub(async () => ({
+        MeetingTimeSuggestions: [{ ...SUGGESTIONS.MeetingTimeSuggestions[0], MeetingTimeSlot: {} }],
+      })),
+    );
+    const res = parseToolResult<{ suggestions: Record<string, unknown>[] }>(
+      await h.callTool('outlook_find_meeting_times', args),
+    );
+    expect(res.suggestions[0]).not.toHaveProperty('createEventArgs');
+    await h.close();
+  });
+
+  it('points each tool at the hand-off in its description', async () => {
+    const cal = await harness(stub(async () => SUGGESTIONS));
+    const find = (await cal.listTools()).find((t) => t.name === 'outlook_find_meeting_times');
+    expect(find?.description).toMatch(/createEventArgs/);
+    await cal.close();
+    const w = await createTestHarness((s: McpServer) => registerWriteTools(s, stub(async () => ({}))));
+    const create = (await w.listTools()).find((t) => t.name === 'outlook_create_event');
+    expect(create?.description).toMatch(/createEventArgs/);
+    await w.close();
   });
 });
 
