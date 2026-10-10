@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.5.0...v0.5.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **mail:** tell agents an answered invite is already filed and tidy triage edge cases ([#65](https://github.com/chrischall/office-outlook-mcp/issues/65)) ([55e5131](https://github.com/chrischall/office-outlook-mcp/commit/55e5131aabc6a37871d3ae234d991107628fbe2e))
+
 ## [0.5.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.4.1...v0.5.0) (2026-10-10)
 
 
