@@ -112,6 +112,7 @@ describe('directory tools hit the documented paths', () => {
     ['outlook_list_contacts', {}, '/me/contacts'],
     ['outlook_list_people', {}, '/me/people'],
     ['outlook_list_tasks', {}, '/me/tasks'],
+    ['outlook_list_categories', {}, '/me/outlook/masterCategories'],
   ];
 
   it.each(cases)('%s -> %s', async (name, args, path) => {

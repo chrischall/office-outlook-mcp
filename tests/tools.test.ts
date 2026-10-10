@@ -248,6 +248,7 @@ describe('read tools', () => {
     expect(names).toEqual([
       'outlook_get_mailbox_settings',
       'outlook_get_profile',
+      'outlook_list_categories',
       'outlook_list_contacts',
       'outlook_list_people',
       'outlook_list_tasks',

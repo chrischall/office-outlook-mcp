@@ -160,6 +160,10 @@
       "description": "List people ranked by relevance"
     },
     {
+      "name": "outlook_list_categories",
+      "description": "List the mailbox's categories and their colours"
+    },
+    {
       "name": "outlook_list_tasks",
       "description": "List Outlook tasks"
     },
@@ -174,6 +178,10 @@
     {
       "name": "outlook_mark_read",
       "description": "Mark a message read or unread (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_update_message",
+      "description": "Flag, categorise or mark read up to 50 messages at once (asks you to confirm first)"
     },
     {
       "name": "outlook_move_message",

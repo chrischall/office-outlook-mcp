@@ -5,6 +5,7 @@ import {
   CONFIRM_INJECTION_RULE,
   confirmTokenParam,
   confirmWrite,
+  mapWithConcurrency,
   McpToolError,
   minifiedResult,
   WriteOutcomeUnknownError,
@@ -209,6 +210,45 @@ function bodyWithComment(
   return { ContentType: 'HTML', Content };
 }
 
+/** Tool input → the `Flag.FlagStatus` Outlook stores. */
+const FLAG_STATUS = { flagged: 'Flagged', complete: 'Complete', none: 'NotFlagged' } as const;
+
+/** Messages updated in parallel, bounded so a 50-id batch cannot burst. */
+const UPDATE_CONCURRENCY = 4;
+
+interface MessageState {
+  IsRead?: boolean;
+  Flag?: { FlagStatus?: string };
+  Categories?: string[];
+}
+
+const sameCategories = (a: string[] | undefined, b: string[] | undefined) =>
+  [...(a ?? [])].map((c) => c.toLowerCase()).sort().join('\n') ===
+  [...(b ?? [])].map((c) => c.toLowerCase()).sort().join('\n');
+
+/**
+ * `current` with `remove` taken out and `add` appended. Outlook matches
+ * category names without regard to case, so both sides do too, and an add
+ * already present (in any case) is not doubled.
+ */
+function editCategories(current: string[] | undefined, add: string[], remove: string[]): string[] {
+  const gone = new Set(remove.map((c) => c.toLowerCase()));
+  const next = (current ?? []).filter((c) => !gone.has(c.toLowerCase()));
+  for (const c of add) {
+    if (!next.some((n) => n.toLowerCase() === c.toLowerCase())) next.push(c);
+  }
+  return next;
+}
+
+/** Fields the PATCH asked for that `after` does not show. */
+function unchangedFields(payload: MessageState, after: MessageState): string[] {
+  const out: string[] = [];
+  if (payload.IsRead !== undefined && after.IsRead !== payload.IsRead) out.push('IsRead');
+  if (payload.Flag && after.Flag?.FlagStatus !== payload.Flag.FlagStatus) out.push('Flag');
+  if (payload.Categories && !sameCategories(after.Categories, payload.Categories)) out.push('Categories');
+  return out;
+}
+
 export function registerWriteTools(server: McpServer, client: OutlookClient): void {
   server.registerTool(
     'outlook_send_mail',
@@ -344,6 +384,106 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         IsRead: after?.IsRead,
         ...(after?.IsRead === isRead ? {} : { warning: 'Outlook accepted the write but the value did not change.' }),
       });
+    },
+  );
+
+  server.registerTool(
+    'outlook_update_message',
+    {
+      description:
+        'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_get_unread → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest. Only your mailbox changes — nobody is notified.' +
+        ' ' +
+        CONFIRM_FLOW_SENTENCE,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      inputSchema: z.object({
+        messageIds: z.array(z.string().min(1)).min(1).max(50).describe('Message Ids (1 to 50)'),
+        flag: z.enum(['flagged', 'complete', 'none']).optional().describe('Follow-up flag to set'),
+        categories: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Replace the categories with exactly these ([] clears them)'),
+        addCategories: z.array(z.string().min(1)).optional().describe('Categories to add'),
+        removeCategories: z.array(z.string().min(1)).optional().describe('Categories to remove'),
+        isRead: z.boolean().optional().describe('true to mark read, false to mark unread'),
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async ({ messageIds, flag, categories, addCategories, removeCategories, isRead, confirmToken }, ctx) => {
+      const add = addCategories ?? [];
+      const remove = removeCategories ?? [];
+      const editing = add.length > 0 || remove.length > 0;
+      if (categories !== undefined && editing) {
+        throw new McpToolError('Pass `categories` or `addCategories`/`removeCategories`, not both.', {
+          hint: '`categories` replaces the whole list; the add/remove pair edits the current one.',
+        });
+      }
+      // The part of the PATCH that is the same for every message. An add/remove
+      // edit is per message, worked out from each one's current list below.
+      const fixed: MessageState = {
+        ...(isRead !== undefined ? { IsRead: isRead } : {}),
+        ...(flag ? { Flag: { FlagStatus: FLAG_STATUS[flag] } } : {}),
+        ...(categories !== undefined ? { Categories: categories } : {}),
+      };
+      if (Object.keys(fixed).length === 0 && !editing) {
+        throw new McpToolError('Nothing to update.', {
+          hint: 'Pass at least one of flag, isRead, categories, addCategories or removeCategories.',
+        });
+      }
+
+      const ids = [...new Set(messageIds)];
+      const pathOf = (id: string) => `/me/messages/${encodeURIComponent(id)}`;
+      const changes = [
+        ...(flag ? [`flag ${flag}`] : []),
+        ...(isRead !== undefined ? [isRead ? 'mark read' : 'mark unread'] : []),
+        ...(categories !== undefined ? [`set categories [${categories.join(', ')}]`] : []),
+        ...(add.length ? [`add categories [${add.join(', ')}]`] : []),
+        ...(remove.length ? [`remove categories [${remove.join(', ')}]`] : []),
+      ];
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_update_message',
+        action: 'mail.update',
+        message: 'Review and confirm this change:',
+        summary: `Update ${ids.length} message${ids.length === 1 ? '' : 's'}: ${changes.join('; ')}`,
+        // One signed-in mailbox per server process.
+        account: undefined,
+        target: ids.join(','),
+        request: {
+          method: 'PATCH',
+          path: ids.length === 1 ? pathOf(ids[0]) : '/me/messages/{id}',
+          body: editing
+            ? { ...fixed, Categories: `(each message's current categories${add.length ? ` + ${add.join(', ')}` : ''}${remove.length ? ` - ${remove.join(', ')}` : ''})` }
+            : fixed,
+        },
+        confirmToken,
+      });
+      if (gate) return gate;
+
+      const results = await mapWithConcurrency(ids, UPDATE_CONCURRENCY, async (id) => {
+        try {
+          const payload: MessageState = { ...fixed };
+          if (editing) {
+            // PATCH replaces the whole list, so build it from the current one.
+            const current = await client.get<MessageState>(`${pathOf(id)}?$select=Categories`);
+            payload.Categories = editCategories(current?.Categories, add, remove);
+          }
+          const echoed = await client.write<MessageState | undefined>('PATCH', pathOf(id), payload);
+          // Outlook answers a PATCH with the updated message; check that rather
+          // than trust the 2xx, and re-read only when it came back without one.
+          const after =
+            echoed && typeof echoed === 'object'
+              ? echoed
+              : ((await client.get<MessageState>(`${pathOf(id)}?$select=IsRead,Flag,Categories`)) ?? {});
+          const unchanged = unchangedFields(payload, after);
+          return unchanged.length
+            ? { id, ok: false, error: `Outlook accepted the write but these did not change: ${unchanged.join(', ')}.` }
+            : { id, ok: true };
+        } catch (e) {
+          // PATCH is idempotent, so a failed id is safe to send again as-is.
+          return { id, ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      });
+      const updated = results.filter((r) => r.ok).length;
+      return minifiedResult({ updated, failed: results.length - updated, results });
     },
   );
 

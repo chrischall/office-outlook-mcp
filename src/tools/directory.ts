@@ -121,4 +121,21 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));
     },
   );
+
+  server.registerTool(
+    'outlook_list_categories',
+    {
+      description:
+        "List the mailbox's categories (the master list) with their colours — the names outlook_update_message can add or remove.",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const data = await client.get<{ value?: { DisplayName?: string; Color?: string }[] }>(
+        '/me/outlook/masterCategories',
+      );
+      const categories = (data?.value ?? []).map((c) => ({ name: c.DisplayName, color: c.Color }));
+      return minifiedResult({ count: categories.length, categories });
+    },
+  );
 }
