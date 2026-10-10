@@ -116,6 +116,10 @@
       "description": "Get one message including its body"
     },
     {
+      "name": "outlook_get_unread",
+      "description": "Triage batch: unread messages with text bodies and invite events in one call"
+    },
+    {
       "name": "outlook_list_attachments",
       "description": "List a message's attachments"
     },

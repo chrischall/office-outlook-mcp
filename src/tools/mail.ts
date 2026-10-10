@@ -1,12 +1,21 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { minifiedResult, resolveView, viewParam, McpToolError } from '@chrischall/mcp-utils';
+import {
+  mapWithConcurrency,
+  minifiedResult,
+  resolveView,
+  viewParam,
+  McpToolError,
+} from '@chrischall/mcp-utils';
 import type { OutlookClient, QueryParams } from '../client.js';
 import {
+  addr,
+  addrs,
   compactFolder,
   compactMessage,
   fullMessage,
   projectCollection,
+  type OutlookEvent,
   type OutlookFolder,
   type OutlookMessage,
   VIEWS,
@@ -35,6 +44,92 @@ const LIST_SELECT = 'Id,Subject,From,ToRecipients,ReceivedDateTime,IsRead,HasAtt
 /** `inbox` etc. pass through; anything else is treated as an opaque folder id. */
 function folderSegment(folder: string): string {
   return encodeURIComponent(folder);
+}
+
+/**
+ * Fields for the triage listing. `MeetingMessageType` exists only on the
+ * derived EventMessage type, so it is selected with the type cast — the same
+ * form the `$expand` below uses. A plain Message row simply omits it.
+ */
+const UNREAD_SELECT = [
+  'Id',
+  'Subject',
+  'From',
+  'ToRecipients',
+  'CcRecipients',
+  'ReceivedDateTime',
+  'Importance',
+  'HasAttachments',
+  'Categories',
+  'Flag',
+  'ConversationId',
+  'Microsoft.OutlookServices.EventMessage/MeetingMessageType',
+].join(',');
+
+/** The invite's calendar item, inlined on the message it arrived as. */
+const EVENT_EXPAND = 'Microsoft.OutlookServices.EventMessage/Event';
+
+/** Bodies (and invite events) fetched in parallel, bounded so a 50-row batch cannot burst. */
+const BODY_CONCURRENCY = 4;
+
+type TriageKind = 'mail' | 'meetingRequest' | 'meetingCancelled' | 'meetingResponse';
+
+interface UnreadRow extends OutlookMessage {
+  '@odata.type'?: string;
+  MeetingMessageType?: string;
+  Flag?: { FlagStatus?: string };
+}
+
+interface InviteEvent extends OutlookEvent {
+  ResponseStatus?: { Response?: string };
+}
+
+/**
+ * Sort a row into what an agent does with it. `MeetingMessageType` decides;
+ * an EventMessage that arrives without it (a shape we have not seen, but the
+ * type name is all that is left) falls back to its `@odata.type`, so an
+ * invite never silently reads as plain mail.
+ */
+function triageKind(m: UnreadRow): TriageKind {
+  switch (m.MeetingMessageType) {
+    case 'MeetingRequest':
+      return 'meetingRequest';
+    case 'MeetingCancelled':
+      return 'meetingCancelled';
+    case 'MeetingAccepted':
+    case 'MeetingTenativelyAccepted': // sic — Outlook's spelling
+    case 'MeetingTentativelyAccepted':
+    case 'MeetingDeclined':
+      return 'meetingResponse';
+  }
+  const type = m['@odata.type'] ?? '';
+  if (!type.includes('EventMessage')) return 'mail';
+  if (/Request$/.test(type)) return 'meetingRequest';
+  if (/Cancel/.test(type)) return 'meetingCancelled';
+  return 'meetingResponse';
+}
+
+function triageEvent(e: InviteEvent): Record<string, unknown> {
+  return stripUndefined({
+    id: e.Id,
+    subject: e.Subject,
+    start: e.Start?.DateTime,
+    end: e.End?.DateTime,
+    timeZone: e.Start?.TimeZone,
+    location: e.Location?.DisplayName || undefined,
+    organizer: addr(e.Organizer),
+    responseStatus: e.ResponseStatus?.Response,
+    isCancelled: e.IsCancelled,
+  });
+}
+
+function stripUndefined(o: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+}
+
+/** `ReceivedDateTime ge` literal: OData wants it unquoted, and seconds are precision enough. */
+function sinceLiteral(hours: number): string {
+  return new Date(Date.now() - hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 export function registerMailTools(server: McpServer, client: OutlookClient): void {
@@ -153,6 +248,112 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
       return mailboxUntrusted(v === 'full' ? fullMessage(data) : compactMessage(data));
+    },
+  );
+
+  server.registerTool(
+    'outlook_get_unread',
+    {
+      description:
+        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id. This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the ids you handled, so the next call returns only what is still new. Follow `nextLink` for more.' +
+        ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      inputSchema: z.object({
+        folder: z.string().min(1).optional().describe('Folder id or well-known name (default "inbox")'),
+        limit: z.number().int().min(1).max(50).optional().describe('Max messages (default 25, max 50)'),
+        sinceHours: z
+          .number()
+          .positive()
+          .max(24 * 365)
+          .optional()
+          .describe('Only mail received in the last N hours'),
+        includeBody: z
+          .boolean()
+          .optional()
+          .describe('Fetch each plain-text body (default true). Invite events are resolved either way.'),
+        maxBodyChars: z
+          .number()
+          .int()
+          .min(100)
+          .max(100_000)
+          .optional()
+          .describe('Truncate each body to this many characters (default 4000); `bodyTruncated` marks a cut'),
+        nextLink: nextLinkParam,
+      }),
+    },
+    async ({ folder, limit, sinceHours, includeBody, maxBodyChars, nextLink }) => {
+      // Outlook rejects a $filter that does not lead with the $orderby
+      // property ("InefficientFilter"), so the date bound goes first.
+      const filter = [
+        sinceHours !== undefined ? `ReceivedDateTime ge ${sinceLiteral(sinceHours)}` : undefined,
+        'IsRead eq false',
+      ]
+        .filter((c): c is string => c !== undefined)
+        .join(' and ');
+      const data = await fetchPage<{ value?: UnreadRow[]; '@odata.nextLink'?: string }>(
+        client,
+        nextLink,
+        `/me/mailfolders/${folderSegment(folder ?? 'inbox')}/messages`,
+        {
+          query: {
+            $top: limit ?? 25,
+            $select: UNREAD_SELECT,
+            $filter: filter,
+            $orderby: 'ReceivedDateTime desc',
+          },
+        },
+      );
+      const rows = Array.isArray(data?.value) ? data.value : [];
+      const wantBody = includeBody !== false;
+      const cap = maxBodyChars ?? 4000;
+
+      const items = await mapWithConcurrency(rows, BODY_CONCURRENCY, async (m) => {
+        const kind = triageKind(m);
+        const item: Record<string, unknown> = stripUndefined({
+          id: m.Id,
+          kind,
+          receivedAt: m.ReceivedDateTime,
+          from: addr(m.From ?? m.Sender),
+          to: addrs(m.ToRecipients),
+          cc: addrs(m.CcRecipients),
+          subject: m.Subject,
+          importance: m.Importance,
+          hasAttachments: m.HasAttachments || undefined,
+          categories: m.Categories?.length ? m.Categories : undefined,
+          flag: m.Flag?.FlagStatus,
+          conversationId: m.ConversationId,
+        });
+        // A response to an invite you sent has no event of yours to act on.
+        const wantEvent = kind === 'meetingRequest' || kind === 'meetingCancelled';
+        if ((!wantBody && !wantEvent) || m.Id === undefined) return item;
+        try {
+          const one = await client.get<UnreadRow & { Event?: InviteEvent }>(
+            `/me/messages/${encodeURIComponent(m.Id)}`,
+            {
+              text: wantBody,
+              query: {
+                $select: wantBody ? 'Id,Body' : 'Id',
+                $expand: wantEvent ? EVENT_EXPAND : undefined,
+              },
+            },
+          );
+          if (wantBody) {
+            const text = (one.Body?.Content ?? '').trim();
+            item.body = text.length > cap ? text.slice(0, cap) : text;
+            if (text.length > cap) item.bodyTruncated = true;
+          }
+          if (wantEvent && one.Event) item.event = triageEvent(one.Event);
+        } catch (e) {
+          // One unreadable message must not cost the agent the whole batch.
+          item.error = e instanceof Error ? e.message : String(e);
+        }
+        return item;
+      });
+
+      const out: Record<string, unknown> = { count: items.length, items };
+      const next = data?.['@odata.nextLink'];
+      if (next) out.nextLink = next;
+      return mailboxUntrusted(out);
     },
   );
 

@@ -16,18 +16,18 @@ import { projectOrRaw } from '@chrischall/mcp-utils';
 export const VIEWS = ['compact', 'full', 'raw'] as const;
 
 /** A `{Name, Address}` pair as Outlook nests it under `EmailAddress`. */
-interface Recipient {
+export interface Recipient {
   EmailAddress?: { Name?: string; Address?: string };
 }
 
-function addr(r: Recipient | undefined): string | undefined {
+export function addr(r: Recipient | undefined): string | undefined {
   const e = r?.EmailAddress;
   if (!e) return undefined;
   if (e.Name && e.Address && e.Name !== e.Address) return `${e.Name} <${e.Address}>`;
   return e.Address ?? e.Name;
 }
 
-function addrs(list: Recipient[] | undefined): string[] | undefined {
+export function addrs(list: Recipient[] | undefined): string[] | undefined {
   if (!Array.isArray(list) || list.length === 0) return undefined;
   return list.map((r) => addr(r)).filter((s): s is string => s !== undefined);
 }
