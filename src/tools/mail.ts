@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
+  imageResult,
   mapWithConcurrency,
   minifiedResult,
   resolveView,
@@ -125,6 +126,50 @@ function triageEvent(e: InviteEvent): Record<string, unknown> {
 
 function stripUndefined(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+}
+
+/** Metadata probe for one attachment: never the bytes. */
+const ATTACHMENT_META_SELECT = 'Id,Name,ContentType,Size,IsInline';
+
+/** Above this an attachment is never inlined, whatever its type (base64 inflates it ~4/3 again). */
+const MAX_INLINE_BYTES = 5 * 1024 * 1024;
+
+/** Decoded text is cut here; a longer file is marked `textTruncated`. */
+const MAX_TEXT_BYTES = 200 * 1024;
+
+/**
+ * Types worth decoding to text. Senders often label a calendar or CSV file
+ * `application/octet-stream`, so the file extension is consulted as well.
+ */
+const TEXT_TYPE = /^text\/|^application\/(json|xml|csv|ics|calendar)\b|\+(json|xml)$/i;
+const TEXT_EXT = /\.(txt|csv|tsv|json|xml|ics|md|log|html?)$/i;
+
+interface OutlookAttachment {
+  '@odata.type'?: string;
+  Id?: string;
+  Name?: string;
+  ContentType?: string | null;
+  Size?: number;
+  IsInline?: boolean;
+  ContentBytes?: string;
+}
+
+type AttachmentKind = 'file' | 'item' | 'reference';
+
+function attachmentKind(a: OutlookAttachment): AttachmentKind {
+  const type = a['@odata.type'] ?? '';
+  if (/ItemAttachment$/.test(type)) return 'item';
+  if (/ReferenceAttachment$/.test(type)) return 'reference';
+  return 'file';
+}
+
+/** `image/*` renders as MCP image content; SVG is markup, so it reads as text instead. */
+function isImage(contentType: string): boolean {
+  return /^image\//i.test(contentType) && !/svg/i.test(contentType);
+}
+
+function isText(contentType: string, name: string): boolean {
+  return TEXT_TYPE.test(contentType) || /svg/i.test(contentType) || TEXT_EXT.test(name);
 }
 
 /** `ReceivedDateTime ge` literal: OData wants it unquoted, and seconds are precision enough. */
@@ -379,6 +424,80 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         { query: { $select: 'Id,Name,Size,ContentType' } },
       );
       return minifiedResult(plainCollection(data));
+    },
+  );
+
+  server.registerTool(
+    'outlook_get_attachment',
+    {
+      description:
+        "Get one attachment's content (ids from outlook_list_attachments). An image comes back as image content the model can see; a text-like file (text/*, JSON, CSV, XML, .ics) is decoded to `text`, capped at 200 KB (`textTruncated` marks a cut). Any other binary (PDF, Office, archives) and anything over 5 MB is returned as metadata only — its bytes are not inlined. An attached Outlook item (a forwarded email or event) or a cloud-file link has no bytes to return; the result says which." +
+        ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      inputSchema: z.object({
+        messageId: z.string().min(1).describe('Message Id'),
+        attachmentId: z.string().min(1).describe('Attachment Id from outlook_list_attachments'),
+      }),
+    },
+    async ({ messageId, attachmentId }) => {
+      const path = `/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`;
+      // Metadata first, so a 25 MB PDF is never downloaded only to be dropped.
+      const meta = await client.get<OutlookAttachment>(path, { query: { $select: ATTACHMENT_META_SELECT } });
+      const kind = attachmentKind(meta);
+      const contentType = meta.ContentType ?? '';
+      const name = meta.Name ?? '';
+      const out: Record<string, unknown> = stripUndefined({
+        messageId,
+        attachmentId,
+        name: meta.Name,
+        contentType: meta.ContentType ?? undefined,
+        size: meta.Size,
+        isInline: meta.IsInline || undefined,
+        kind,
+        inlined: false,
+      });
+
+      if (kind === 'item') {
+        out.hint =
+          'This is an attached Outlook item (an email, event or contact), not a file, so it has no bytes to return. Ask the sender for it, or open the parent message in Outlook.';
+        return mailboxUntrusted(out);
+      }
+      if (kind === 'reference') {
+        out.hint =
+          'This is a link to a cloud file (OneDrive/SharePoint), not a file stored in the message, so there are no bytes to return.';
+        return mailboxUntrusted(out);
+      }
+      const image = isImage(contentType);
+      if (!image && !isText(contentType, name)) {
+        out.hint = 'Binary content is not inlined: only images and text-like files are returned. Open it in Outlook to read it.';
+        return mailboxUntrusted(out);
+      }
+      if ((meta.Size ?? 0) > MAX_INLINE_BYTES) {
+        out.hint = 'Content is not inlined above 5 MB. Open it in Outlook to read it.';
+        return mailboxUntrusted(out);
+      }
+
+      const full = await client.get<OutlookAttachment>(path);
+      const bytes = full.ContentBytes;
+      if (typeof bytes !== 'string' || bytes.length === 0) {
+        out.hint = 'Outlook returned no content for this attachment.';
+        return mailboxUntrusted(out);
+      }
+      const buf = Buffer.from(bytes, 'base64');
+      // Size is Outlook's figure for the whole record; the decoded bytes are the real test.
+      if (buf.length > MAX_INLINE_BYTES) {
+        out.hint = 'Content is not inlined above 5 MB. Open it in Outlook to read it.';
+        return mailboxUntrusted(out);
+      }
+      out.inlined = true;
+      if (image) {
+        // The name is the sender's text, so the metadata keeps its envelope; the image follows it.
+        const env = mailboxUntrusted(out);
+        return { ...env, content: [...env.content, ...imageResult(bytes, contentType).content] };
+      }
+      out.text = buf.subarray(0, MAX_TEXT_BYTES).toString('utf8');
+      if (buf.length > MAX_TEXT_BYTES) out.textTruncated = true;
+      return mailboxUntrusted(out);
     },
   );
 }

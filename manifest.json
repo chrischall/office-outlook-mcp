@@ -124,6 +124,10 @@
       "description": "List a message's attachments"
     },
     {
+      "name": "outlook_get_attachment",
+      "description": "Get one attachment: images as image content, text-like files decoded, other binaries as metadata"
+    },
+    {
       "name": "outlook_list_events",
       "description": "List calendar events in a date window"
     },
