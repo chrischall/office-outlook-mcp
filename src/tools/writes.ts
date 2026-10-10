@@ -157,6 +157,58 @@ const naiveMs = (dt: string) => Date.parse(`${dt.replace(/\.\d+$/, '')}Z`);
 const fromNaiveMs = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, '');
 const trimTime = (dt: string | undefined) => dt?.replace(/\.\d+$/, '');
 
+/** Tool input → the action segments Outlook takes for a send and for a draft. */
+const REPLY_MODES = {
+  reply: { send: 'reply', draft: 'createreply', prefix: 'RE: ' },
+  replyAll: { send: 'replyall', draft: 'createreplyall', prefix: 'RE: ' },
+  forward: { send: 'forward', draft: 'createforward', prefix: 'FW: ' },
+} as const;
+
+type Address = { EmailAddress?: { Address?: string; Name?: string } };
+
+interface ReplyOriginal {
+  Subject?: string;
+  From?: Address;
+  ReplyTo?: Address[];
+  ToRecipients?: Address[];
+  CcRecipients?: Address[];
+}
+
+/** Addresses in order, case-insensitively de-duplicated. */
+function addresses(...lists: (Address[] | undefined)[]): string[] {
+  const seen = new Map<string, string>();
+  for (const a of lists.flat()) {
+    const v = a?.EmailAddress?.Address;
+    if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+  }
+  return [...seen.values()];
+}
+
+const escapeHtml = (t: string) =>
+  t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * The draft's body with `comment` written above the quoted original that
+ * createreply/createforward put there. PATCHing a bare comment would replace
+ * the quote, so the existing content is kept and the comment goes first —
+ * inside `<body>` for HTML, so the result is still one document.
+ */
+function bodyWithComment(
+  body: { ContentType?: string; Content?: string } | undefined,
+  comment: string,
+): { ContentType: string; Content: string } {
+  const existing = body?.Content ?? '';
+  if (body?.ContentType?.toLowerCase() !== 'html') {
+    return { ContentType: 'Text', Content: existing ? `${comment}\n\n${existing}` : comment };
+  }
+  const block = `<div>${escapeHtml(comment).replace(/\r?\n/g, '<br>')}</div><br>`;
+  const open = /<body[^>]*>/i.exec(existing);
+  const Content = open
+    ? existing.slice(0, open.index + open[0].length) + block + existing.slice(open.index + open[0].length)
+    : block + existing;
+  return { ContentType: 'HTML', Content };
+}
+
 export function registerWriteTools(server: McpServer, client: OutlookClient): void {
   server.registerTool(
     'outlook_send_mail',
@@ -725,6 +777,103 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           ? {}
           : { warning: `Outlook accepted the response but the status did not change (still ${got ?? 'unknown'}).` }),
       });
+    },
+  );
+
+  server.registerTool(
+    'outlook_reply',
+    {
+      description:
+        'Reply, reply-all or forward a message, with `comment` as your new text above the quoted original. Outlook picks the recipients for reply (the sender, or its Reply-To) and reply-all (sender plus the original To and Cc, minus you); a forward needs `to`. `draftOnly: true` leaves the reply in Drafts and returns its id, sending nothing and asking no confirmation; otherwise it is sent at once.' +
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' The preview shows the recipients, subject and comment. ' +
+        TIMEOUT_SENTENCE +
+        ' ' +
+        CONFIRM_INJECTION_RULE,
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      inputSchema: z.object({
+        messageId: z.string().min(1).describe('Id of the message to answer or forward'),
+        mode: z.enum(['reply', 'replyAll', 'forward']).describe('reply (sender only), replyAll, or forward'),
+        comment: z.string().describe('Your text, placed above the quoted original'),
+        to: recipientList.describe('Forward recipients\' email addresses (forward only, required there)'),
+        draftOnly: z
+          .boolean()
+          .optional()
+          .describe('Save to Drafts instead of sending (default false)'),
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async ({ messageId, mode, comment, to, draftOnly, confirmToken }, ctx) => {
+      if (mode === 'forward' && !to?.length) {
+        throw new McpToolError('A forward needs at least one recipient.', {
+          hint: 'Pass `to` with the addresses to forward to.',
+        });
+      }
+      if (mode !== 'forward' && to?.length) {
+        throw new McpToolError('`to` applies only to a forward.', {
+          hint: 'A reply goes where Outlook computes; use mode "forward" to send it somewhere else, or outlook_send_mail.',
+        });
+      }
+      const { send, draft, prefix } = REPLY_MODES[mode];
+      const base = `/me/messages/${encodeURIComponent(messageId)}`;
+      const forwardTo = mode === 'forward' ? { ToRecipients: toRecipients(to) } : {};
+
+      if (draftOnly === true) {
+        // Nothing leaves the mailbox: the draft sits in Drafts until sent from
+        // Outlook, so there is no one to protect with a confirmation.
+        const created = await client.write<{ Id?: string; WebLink?: string; Body?: { ContentType?: string; Content?: string } }>(
+          'POST',
+          `${base}/${draft}`,
+          {},
+        );
+        if (!created?.Id) {
+          throw new McpToolError('Outlook did not return the draft it created.', {
+            hint: 'Check the Drafts folder before trying again.',
+          });
+        }
+        await client.write('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
+          Body: bodyWithComment(created.Body, comment),
+          ...forwardTo,
+        });
+        return minifiedResult({ drafted: true, mode, draftId: created.Id, WebLink: created.WebLink });
+      }
+
+      // What Outlook will address the reply to, for the preview. The send
+      // endpoint computes this itself; the read only shows it in advance.
+      const orig = await client.get<ReplyOriginal>(base, {
+        query: { $select: 'Subject,From,ReplyTo,ToRecipients,CcRecipients' },
+      });
+      const sender = orig?.ReplyTo?.length ? orig.ReplyTo : orig?.From ? [orig.From] : [];
+      const recipients =
+        mode === 'forward'
+          ? { to: to ?? [], cc: [] as string[] }
+          : mode === 'replyAll'
+            ? { to: addresses(sender, orig?.ToRecipients), cc: addresses(orig?.CcRecipients) }
+            : { to: addresses(sender), cc: [] as string[] };
+      const subject = `${prefix}${orig?.Subject ?? ''}`;
+      const path = `${base}/${send}`;
+      const payload = { Comment: comment, ...forwardTo };
+      const who = [...recipients.to, ...recipients.cc.map((c) => `cc ${c}`)].join(', ');
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_reply',
+        action: `mail.${send}`,
+        message: 'Review and confirm this email before it is sent:',
+        summary:
+          `${mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply all' : 'Reply'} "${subject}"` +
+          ` to ${who || '(no recipients)'}${mode === 'replyAll' ? ' (Outlook leaves out your own address)' : ''}` +
+          `, with comment: "${comment}"`,
+        // One signed-in mailbox per server process.
+        account: undefined,
+        target: messageId,
+        request: { method: 'POST', path, body: payload },
+        confirmToken,
+      });
+      if (gate) return gate;
+      const sent = await writeOrUnknown(() => client.write('POST', path, payload), 'Sent Items');
+      if (!sent.ok) return sent.result;
+      // Like sendmail, these return 202 with no body: nothing to re-read.
+      return minifiedResult({ sent: true, mode, subject, to: recipients.to, cc: recipients.cc });
     },
   );
 }

@@ -38,7 +38,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(23);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(24);
   });
 
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {
@@ -76,6 +76,7 @@ describe('tool annotations', () => {
     expect(destructive('outlook_send_mail')).toBe(true);
     expect(destructive('outlook_create_event')).toBe(true);
     expect(destructive('outlook_update_event')).toBe(true);
+    expect(destructive('outlook_reply')).toBe(true);
     // No tool in this set deletes a draft, so nothing restores the prior state.
     expect(destructive('outlook_create_draft')).toBe(true);
     // Self-inverse: mark_read(isRead: !x) and move_message back to the old folder.

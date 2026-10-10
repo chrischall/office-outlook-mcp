@@ -192,6 +192,10 @@
       "description": "Accept, tentatively accept or decline a meeting invite (asks you to confirm first when the organizer is notified)"
     },
     {
+      "name": "outlook_reply",
+      "description": "Reply, reply-all or forward a message, or save it as a draft (asks you to confirm first when sending)"
+    },
+    {
       "name": "outlook_healthcheck",
       "description": "Report credential state and probe the API"
     }
