@@ -249,6 +249,26 @@ function unchangedFields(payload: MessageState, after: MessageState): string[] {
   return out;
 }
 
+/**
+ * outlook_create_event's input. Exported so outlook_find_meeting_times can be
+ * tested to hand back `createEventArgs` this schema accepts unchanged.
+ */
+export const createEventInput = z.object({
+  subject: z.string().describe('Event title'),
+  start: z.string().min(1).describe('Start, ISO 8601 local time e.g. 2026-09-22T15:00:00'),
+  end: z.string().min(1).describe('End, ISO 8601 local time'),
+  timeZone: z
+    .string()
+    .optional()
+    .describe('Windows time-zone name. Defaults to the MAILBOX time zone.'),
+  location: z.string().optional().describe('Location display name'),
+  body: z.string().optional().describe('Event description'),
+  attendees: recipientList.describe('Required attendees\' email addresses'),
+  optionalAttendees: recipientList.describe('Optional attendees\' email addresses'),
+  teamsMeeting: teamsMeetingParam,
+  confirmToken: confirmTokenParam,
+});
+
 export function registerWriteTools(server: McpServer, client: OutlookClient): void {
   server.registerTool(
     'outlook_send_mail',
@@ -537,7 +557,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_event',
     {
       description:
-        'Create a calendar event or meeting. A Microsoft Teams meeting is attached by default (`teamsMeeting: false` to skip) and its join link is returned. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation. To pick a time first, use outlook_find_meeting_times.' +
+        'Create a calendar event or meeting. A Microsoft Teams meeting is attached by default (`teamsMeeting: false` to skip) and its join link is returned. `timeZone` takes a WINDOWS zone name such as "Eastern Standard Time", not an IANA name. Attendees are emailed an invitation. To pick a time first, use outlook_find_meeting_times: each suggestion it returns carries `createEventArgs` that can be passed here as-is (add `subject` if the search did not set one).' +
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' ' +
@@ -545,21 +565,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-      inputSchema: z.object({
-        subject: z.string().describe('Event title'),
-        start: z.string().min(1).describe('Start, ISO 8601 local time e.g. 2026-09-22T15:00:00'),
-        end: z.string().min(1).describe('End, ISO 8601 local time'),
-        timeZone: z
-          .string()
-          .optional()
-          .describe('Windows time-zone name. Defaults to the MAILBOX time zone.'),
-        location: z.string().optional().describe('Location display name'),
-        body: z.string().optional().describe('Event description'),
-        attendees: recipientList.describe('Required attendees\' email addresses'),
-        optionalAttendees: recipientList.describe('Optional attendees\' email addresses'),
-        teamsMeeting: teamsMeetingParam,
-        confirmToken: confirmTokenParam,
-      }),
+      inputSchema: createEventInput,
     },
     async (
       { subject, start, end, timeZone, location, body, attendees, optionalAttendees, teamsMeeting, confirmToken },
