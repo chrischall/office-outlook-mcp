@@ -86,7 +86,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     'outlook_list_events',
     {
       description:
-        'List calendar events in a date window. This uses the calendar VIEW, which expands recurring series into their individual occurrences — the right tool for "what is on my schedule". Times are returned in `timeZone` when given.' +
+        'List calendar events in a date window. This uses the calendar VIEW, which expands recurring series into their individual occurrences — the right tool for "what is on my schedule". Times are returned in `timeZone` when given. view:"raw" returns Outlook\'s records as-is and uncapped; the list carries no Attendees in any view — outlook_get_event returns them.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
@@ -135,7 +135,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     'outlook_get_event',
     {
       description:
-        'Get one calendar event in full, including attendees and their responses.' +
+        'Get one calendar event in full, including attendees and their responses. Attendees appear in view:"full", every one of them — there is no 20-address cap as on a message\'s To/Cc; view:"raw" returns Outlook\'s untouched record, uncapped, Attendees included.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
