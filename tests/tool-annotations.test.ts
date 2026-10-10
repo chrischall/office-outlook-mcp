@@ -38,7 +38,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(22);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(23);
   });
 
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {
@@ -81,5 +81,7 @@ describe('tool annotations', () => {
     // Self-inverse: mark_read(isRead: !x) and move_message back to the old folder.
     expect(destructive('outlook_mark_read')).toBe(false);
     expect(destructive('outlook_move_message')).toBe(false);
+    // A response can be changed by responding again; nothing is deleted.
+    expect(destructive('outlook_respond_to_invite')).toBe(false);
   });
 });

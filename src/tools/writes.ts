@@ -129,6 +129,29 @@ async function writeOrUnknown<T>(
   }
 }
 
+/** The invite's calendar item, inlined on the message it arrived as. */
+const INVITE_EVENT_EXPAND = 'Microsoft.OutlookServices.EventMessage/Event';
+
+const INVITE_EVENT_SELECT = 'Id,Subject,IsOrganizer,IsCancelled,Start,End,Organizer,ResponseStatus';
+
+interface InviteEvent {
+  Id?: string;
+  Subject?: string;
+  IsOrganizer?: boolean;
+  IsCancelled?: boolean;
+  Start?: { DateTime?: string; TimeZone?: string };
+  End?: { DateTime?: string; TimeZone?: string };
+  Organizer?: { EmailAddress?: { Address?: string; Name?: string } };
+  ResponseStatus?: { Response?: string };
+}
+
+/** Tool input → the action segment Outlook takes and the ResponseStatus it should leave. */
+const INVITE_RESPONSES = {
+  accept: { verb: 'accept', status: 'Accepted' },
+  tentative: { verb: 'tentativelyaccept', status: 'TentativelyAccepted' },
+  decline: { verb: 'decline', status: 'Declined' },
+} as const;
+
 /** Wall-clock arithmetic: both sides are naive times in one zone. */
 const naiveMs = (dt: string) => Date.parse(`${dt.replace(/\.\d+$/, '')}Z`);
 const fromNaiveMs = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, '');
@@ -565,6 +588,142 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ...(unchanged.length
           ? { warning: `Outlook accepted the update but these did not change: ${unchanged.join(', ')}.` }
           : {}),
+      });
+    },
+  );
+
+  server.registerTool(
+    'outlook_respond_to_invite',
+    {
+      description:
+        'Accept, tentatively accept or decline a meeting invitation. Pass the invite\'s `messageId` (from outlook_get_unread, which marks it kind "meetingRequest") or the event\'s `eventId` — exactly one. The organizer is sent your response unless `sendResponse: false`, in which case only your calendar changes and no confirmation is asked. Cancelled meetings and meetings you organize are refused. The result is verified by re-reading the event\'s response status; a declined meeting may leave your calendar entirely.' +
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' ' +
+        TIMEOUT_SENTENCE +
+        ' ' +
+        CONFIRM_INJECTION_RULE,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      inputSchema: z.object({
+        messageId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Id of the invite message (resolved to its event). Give this or eventId.'),
+        eventId: z.string().min(1).optional().describe('Event Id. Give this or messageId.'),
+        response: z.enum(['accept', 'tentative', 'decline']).describe('Your answer'),
+        comment: z.string().optional().describe('Note to the organizer sent with the response'),
+        sendResponse: z
+          .boolean()
+          .optional()
+          .describe('Tell the organizer (default true). false changes only your calendar.'),
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async ({ messageId, eventId, response, comment, sendResponse, confirmToken }, ctx) => {
+      if ((messageId === undefined) === (eventId === undefined)) {
+        throw new McpToolError('Pass exactly one of messageId or eventId.', {
+          hint: 'messageId is the invite in your inbox; eventId is the meeting on your calendar.',
+        });
+      }
+
+      let event: InviteEvent | undefined;
+      if (messageId !== undefined) {
+        // A plain message has no Event to expand, which is how a non-invite shows.
+        const msg = await client.get<{ Event?: InviteEvent }>(
+          `/me/messages/${encodeURIComponent(messageId)}`,
+          { query: { $select: 'Id', $expand: INVITE_EVENT_EXPAND } },
+        );
+        event = msg?.Event;
+        if (!event?.Id) {
+          throw new McpToolError('That message is not a meeting invite.', {
+            hint: 'Only messages outlook_get_unread marks kind "meetingRequest" carry an event to answer.',
+          });
+        }
+      } else {
+        event = await client.get<InviteEvent>(
+          `/me/events/${encodeURIComponent(eventId!)}?$select=${INVITE_EVENT_SELECT}`,
+        );
+      }
+      const id = event?.Id ?? eventId!;
+
+      if (event?.IsCancelled === true) {
+        throw new McpToolError('This meeting has been cancelled; there is nothing to respond to.', {
+          hint: 'Remove it from your calendar in Outlook if it is still shown.',
+        });
+      }
+      if (event?.IsOrganizer === true || event?.ResponseStatus?.Response === 'Organizer') {
+        throw new McpToolError('You organize this meeting, so you cannot respond to it.', {
+          hint: 'To change or call it off, use outlook_update_event or Outlook itself.',
+        });
+      }
+
+      const { verb, status } = INVITE_RESPONSES[response];
+      const notify = sendResponse !== false;
+      const path = `/me/events/${encodeURIComponent(id)}/${verb}`;
+      const payload = { Comment: comment ?? '', SendResponse: notify };
+
+      // Only a response the organizer receives reaches another person; without
+      // one this is a change to your own calendar and needs no confirmation.
+      if (notify) {
+        const when = `${trimTime(event?.Start?.DateTime) ?? '?'} to ${trimTime(event?.End?.DateTime) ?? '?'}${event?.Start?.TimeZone ? ` (${event.Start.TimeZone})` : ''}`;
+        const organizer = event?.Organizer?.EmailAddress?.Address ?? 'the organizer';
+        const gate = await confirmWrite(ctx, {
+          tool: 'outlook_respond_to_invite',
+          action: 'calendar.respond_to_invite',
+          message: 'Review and confirm this response (the organizer is notified):',
+          summary:
+            `${response === 'tentative' ? 'Tentatively accept' : response === 'accept' ? 'Accept' : 'Decline'}` +
+            ` "${event?.Subject ?? id}" ${when}, organized by ${organizer}` +
+            (comment ? `, with comment: "${comment}"` : ''),
+          // One signed-in mailbox per server process.
+          account: undefined,
+          target: id,
+          request: { method: 'POST', path, body: payload },
+          confirmToken,
+        });
+        if (gate) return gate;
+      }
+
+      const write = await writeOrUnknown(
+        () => client.write('POST', path, payload),
+        "the event's response (outlook_get_event)",
+      );
+      if (!write.ok) return write.result;
+
+      // Re-read rather than trust the 202. Declining can remove the event from
+      // the calendar, so a failed read-back after a decline is the expected end.
+      let after: InviteEvent | undefined;
+      try {
+        after = await client.get<InviteEvent>(
+          `/me/events/${encodeURIComponent(id)}?$select=ResponseStatus`,
+        );
+      } catch (e) {
+        if (response === 'decline') {
+          return minifiedResult({
+            responded: true,
+            eventId: id,
+            response: status,
+            sentResponse: notify,
+            note: 'The declined meeting is no longer on your calendar.',
+          });
+        }
+        return minifiedResult({
+          responded: null,
+          eventId: id,
+          sentResponse: notify,
+          warning: `Outlook accepted the response but re-reading the event failed (${e instanceof Error ? e.message : String(e)}), so it is unverified.`,
+        });
+      }
+      const got = after?.ResponseStatus?.Response;
+      return minifiedResult({
+        responded: got === status,
+        eventId: id,
+        response: got,
+        sentResponse: notify,
+        ...(got === status
+          ? {}
+          : { warning: `Outlook accepted the response but the status did not change (still ${got ?? 'unknown'}).` }),
       });
     },
   );
