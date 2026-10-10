@@ -238,7 +238,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_list_messages',
     {
       description:
-        "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless." +
+        "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless. Each message's To list (and Cc, in the full view) holds at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — pass view:\"raw\" for every address." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
@@ -297,7 +297,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_get_message',
     {
       description:
-        'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); pass view:"raw" to get Outlook\'s untouched record.' +
+        'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); pass view:"raw" to get Outlook\'s untouched record. To and Cc list at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — view:"raw" returns every address.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({

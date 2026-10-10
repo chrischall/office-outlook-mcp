@@ -221,3 +221,22 @@ describe('VIEWS', () => {
     expect(VIEWS).toEqual(['compact', 'full', 'raw']);
   });
 });
+
+describe('recipient cap is documented where it applies', () => {
+  it('outlook_list_messages and outlook_get_message say To/Cc stop at 20 and point at view:"raw"', async () => {
+    const { createTestHarness } = await import('@chrischall/mcp-utils/test');
+    const { registerMailTools } = await import('../src/tools/mail.js');
+    const h = await createTestHarness((s) => registerMailTools(s, {} as never));
+    try {
+      const tools = await h.listTools();
+      for (const name of ['outlook_list_messages', 'outlook_get_message']) {
+        const d = tools.find((t) => t.name === name)?.description ?? '';
+        expect(d, name).toMatch(/20/);
+        expect(d, name).toMatch(/ToCount|Truncated/);
+        expect(d, name).toMatch(/view: ?"raw"/);
+      }
+    } finally {
+      await h.close();
+    }
+  });
+});
