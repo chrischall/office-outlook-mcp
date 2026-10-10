@@ -70,6 +70,34 @@
           "description": "Absolute path where the fetchproxy long-term identity keypair is stored (default ~/.fetchproxy/identity/).",
           "isRequired": false,
           "format": "string"
+        },
+        {
+          "name": "MCP_CONFIRM_MODE",
+          "description": "What outlook_send_mail, outlook_reply, outlook_respond_to_invite and the other write tools do on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop): \"ask-user\" (default: the first call returns a preview and a confirmToken, and the model must get your approval in chat before using it), \"auto\" (the model may use the token after reviewing the preview itself) or \"refuse\". An unrecognised value is treated as refuse.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "MCP_CONFIRM_ELICITATION",
+          "description": "\"off\" never shows a confirmation prompt, so every client gets the MCP_CONFIRM_MODE flow. Set it for a client that says it can show prompts but never does. Defaults to on.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "MCP_CONFIRM_TTL_SECONDS",
+          "description": "How long a confirmToken stays valid, in seconds. Defaults to 600.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "MCP_CONFIRM_SECRET",
+          "description": "Signing key for confirmTokens. Random per process by default; set it only if tokens must survive a server restart.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
         }
       ]
     }

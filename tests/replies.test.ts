@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
-import { buildQueryString, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
+import { buildQueryString, McpToolError, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerWriteTools } from '../src/tools/writes.js';
 import type { OutlookClient } from '../src/client.js';
@@ -291,6 +291,41 @@ describe('outlook_reply — draftOnly', () => {
     expect(body).toMatchObject({ drafted: true, draftId: 'd-1' });
     expect(String(body.warning)).toMatch(/comment/i);
     expect(String(body.warning)).toMatch(/oops/);
+    await h.close();
+  });
+
+  it('says the comment MAY have been applied when the follow-up PATCH outcome is unknown', async () => {
+    // The PATCH was sent; a timeout or dropped connection after that says
+    // nothing about whether Outlook applied it. "Failed" would be a lie that
+    // invites a second edit or a second draft.
+    const { client } = stub({ patchError: new WriteOutcomeUnknownError('Outlook', 'PATCH', { timeoutMs: 60_000 }) });
+    const h = await harness(client);
+    const res = await h.callTool('outlook_reply', { messageId: 'm-1', mode: 'reply', comment: 'hi', draftOnly: true });
+    expect(res.isError).toBeFalsy();
+    const body = parseToolResult<Rec>(res);
+    expect(body).toMatchObject({ drafted: true, draftId: 'd-1' });
+    expect(String(body.warning)).toMatch(/may (already )?have been applied/i);
+    expect(String(body.warning)).toMatch(/check the draft/i);
+    expect(String(body.warning)).not.toMatch(/failed/i);
+    await h.close();
+  });
+
+  it('surfaces a credential failure on the follow-up PATCH as the tool error, naming the draft id', async () => {
+    // A rejected token is not about this draft: the agent must re-authenticate,
+    // and a soft warning would bury that. The draft id still goes in the error
+    // so a retry does not leave a second draft behind.
+    const rejected = new McpToolError('Outlook rejected the access token (401).', {
+      hint: 'Open a signed-in Outlook tab and retry.',
+      status: 401,
+      kind: 'credential_rejected',
+    });
+    const { client } = stub({ patchError: rejected });
+    const h = await harness(client);
+    const res = await h.callTool('outlook_reply', { messageId: 'm-1', mode: 'reply', comment: 'hi', draftOnly: true });
+    expect(res.isError).toBe(true);
+    const text = JSON.stringify(res.content);
+    expect(text).toMatch(/d-1/);
+    expect(text).toMatch(/rejected the access token/);
     await h.close();
   });
 

@@ -178,6 +178,69 @@ describe('publish scaffold', () => {
   });
 });
 
+/**
+ * The env keys the server honours. The `OUTLOOK_*` keys are this server's own
+ * (.env.example / README): the token's source, cache and capture deadline,
+ * the bridge port and the API base. `FETCHPROXY_WS_HOST` and
+ * `FETCHPROXY_IDENTITY_DIR` are read by the bundled `@fetchproxy/server`. The
+ * `MCP_CONFIRM_*` keys are mcp-utils' `confirmWrite` settings for the write
+ * tools, as the README's Confirmations table documents them — without them an
+ * mcpb or registry install has no way to set the confirmation mode at all.
+ */
+const ENV = [
+  'FETCHPROXY_IDENTITY_DIR',
+  'FETCHPROXY_WS_HOST',
+  'MCP_CONFIRM_ELICITATION',
+  'MCP_CONFIRM_MODE',
+  'MCP_CONFIRM_SECRET',
+  'MCP_CONFIRM_TTL_SECONDS',
+  'OUTLOOK_ACCESS_TOKEN',
+  'OUTLOOK_API_BASE',
+  'OUTLOOK_CAPTURE_TIMEOUT',
+  'OUTLOOK_DISABLE_FETCHPROXY',
+  'OUTLOOK_TOKEN_CACHE',
+  'OUTLOOK_TOKEN_FILE',
+  'OUTLOOK_WS_PORT',
+];
+
+describe('install surfaces pass every honoured env key', () => {
+  it('manifest.json passes each one from an optional user_config entry', () => {
+    const m = read('manifest.json');
+    const env = (m.server.mcp_config.env ?? {}) as Record<string, string>;
+    expect(Object.keys(env).sort()).toEqual(ENV);
+    for (const [key, value] of Object.entries(env)) {
+      const ref = /^\$\{user_config\.([^}]+)\}$/.exec(value)?.[1];
+      expect(ref, key).toBeDefined();
+      expect(m.user_config?.[ref!]?.required, key).toBe(false);
+    }
+  });
+
+  it('server.json declares each one as optional', () => {
+    const vars = read('server.json').packages[0].environmentVariables as { name: string; isRequired: boolean }[];
+    expect(vars.map((v) => v.name).sort()).toEqual(ENV);
+    expect(vars.every((v) => v.isRequired === false)).toBe(true);
+  });
+
+  it('marks the access token and the confirm signing key secret on both surfaces, and nothing else', () => {
+    const SECRET = ['MCP_CONFIRM_SECRET', 'OUTLOOK_ACCESS_TOKEN'];
+    const vars = read('server.json').packages[0].environmentVariables as { name: string; isSecret?: boolean }[];
+    expect(vars.filter((v) => v.isSecret).map((v) => v.name).sort()).toEqual(SECRET);
+
+    const m = read('manifest.json');
+    const refs = SECRET.map((k) => /^\$\{user_config\.([^}]+)\}$/.exec(m.server.mcp_config.env[k])![1]).sort();
+    const sensitive = Object.entries(m.user_config as Record<string, { sensitive?: boolean }>)
+      .filter(([, c]) => c.sensitive === true)
+      .map(([k]) => k)
+      .sort();
+    expect(sensitive).toEqual(refs);
+  });
+
+  it('documents in the README every MCP_CONFIRM_* key it passes', () => {
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    for (const k of ENV.filter((e) => e.startsWith('MCP_CONFIRM_'))) expect(readme, k).toContain(`\`${k}\``);
+  });
+});
+
 /** Every tool the server registers, with its published description. */
 async function registeredTools(): Promise<{ name: string; description?: string }[]> {
   const client = {
@@ -260,6 +323,14 @@ describe('README tool docs', () => {
     ]) {
       expect(loop, `${tool} missing from the triage loop`).toContain(tool);
     }
+  });
+
+  it('says an answered invite is already filed, so mark-read is for plain mail', () => {
+    // Live 2026-10-10: responding moves the invite to Deleted Items under a new
+    // id, so the loop's old "respond, then mark the ids read" 404'd on invites.
+    const loop = section('Triage loop');
+    expect(loop).toMatch(/Deleted Items/);
+    expect(loop).toMatch(/plain mail/i);
   });
 
   it('lists every tool that wraps third-party text in the untrusted envelope', async () => {

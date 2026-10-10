@@ -319,6 +319,68 @@ describe('outlook_respond_to_invite', () => {
     await h.close();
   });
 
+  describe('the invite message after a response', () => {
+    // Live 2026-10-10: once you respond, Outlook moves the invite MESSAGE to
+    // Deleted Items under a new id, so "respond, then outlook_mark_read the id"
+    // 404s. The result has to say the invite is already filed.
+    const filed = (body: Ev) => {
+      expect(String(body.inviteMessage)).toMatch(/Deleted Items/);
+      expect(String(body.inviteMessage)).toMatch(/outlook_mark_read/);
+    };
+
+    it('says the invite is already filed when answered by its messageId', async () => {
+      const { client } = stub(invite());
+      const h = await harness(client);
+      const body = parseToolResult<Ev>(await confirmed(h, { messageId: 'm-1', response: 'accept' }));
+      expect(body.responded).toBe(true);
+      filed(body);
+      await h.close();
+    });
+
+    it('says so on a verified response by eventId too', async () => {
+      const { client } = stub(invite());
+      const h = await harness(client);
+      filed(parseToolResult<Ev>(await confirmed(h, { eventId: 'ev-1', response: 'tentative' })));
+      await h.close();
+    });
+
+    it('says so on a silent response', async () => {
+      const { client } = stub(invite());
+      const h = await harness(client);
+      filed(
+        parseToolResult<Ev>(
+          await h.callTool('outlook_respond_to_invite', { messageId: 'm-1', response: 'accept', sendResponse: false }),
+        ),
+      );
+      await h.close();
+    });
+
+    it('says so when a declined meeting has left the calendar', async () => {
+      const { client } = stub(invite(), { goneAfterDecline: true });
+      const h = await harness(client);
+      filed(parseToolResult<Ev>(await confirmed(h, { messageId: 'm-1', response: 'decline' })));
+      await h.close();
+    });
+
+    it('says so when the read-back is unverified or did not change', async () => {
+      for (const opts of [{ readBackError: new ApiError(503, 'Outlook 503: busy') }, { persist: false }]) {
+        const { client } = stub(invite(), opts);
+        const h = await harness(client);
+        filed(parseToolResult<Ev>(await confirmed(h, { messageId: 'm-1', response: 'accept' })));
+        await h.close();
+      }
+    });
+
+    it('is described on the tool, so an agent skips mark-read for answered invites', async () => {
+      const { client } = stub(invite());
+      const h = await harness(client);
+      const tool = (await h.listTools()).find((t) => t.name === 'outlook_respond_to_invite');
+      await h.close();
+      expect(tool?.description).toMatch(/Deleted Items/);
+      expect(tool?.description).toMatch(/outlook_mark_read/);
+    });
+  });
+
   it('is annotated idempotent and not destructive', async () => {
     const { client } = stub(invite());
     const h = await harness(client);

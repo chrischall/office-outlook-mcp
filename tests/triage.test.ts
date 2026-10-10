@@ -298,4 +298,15 @@ describe('outlook_get_unread', () => {
     expect(tool?.description).toMatch(/outlook_mark_read/);
     expect(tool?.description).toMatch(/untrusted/i);
   });
+
+  it('tells the agent an answered invite is already filed, so mark-read is for plain mail only', async () => {
+    // Live 2026-10-10: responding moves the invite to Deleted Items under a new
+    // id, so marking its old id read 404s.
+    const s = stub([]);
+    const h = await createTestHarness((srv: McpServer) => registerMailTools(srv, s.client));
+    const tool = (await h.listTools()).find((t) => t.name === 'outlook_get_unread');
+    await h.close();
+    expect(tool?.description).toMatch(/Deleted Items/);
+    expect(tool?.description).not.toMatch(/outlook_mark_read on the ids you handled/);
+  });
 });

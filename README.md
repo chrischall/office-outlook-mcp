@@ -180,7 +180,10 @@ An agent can work through new mail end to end without opening Outlook:
    there are more.
 2. **Act on each item** —
    - an invite: `outlook_respond_to_invite` with the message id and
-     `accept`, `tentative` or `decline` (and an optional comment);
+     `accept`, `tentative` or `decline` (and an optional comment). Once you
+     respond, Outlook moves the invite message to Deleted Items under a new
+     id, so an answered invite is already filed — skip steps 3 and 4 for it
+     (its old id would 404);
    - a message that needs an answer: `outlook_reply` (`reply`, `replyAll` or
      `forward`), or `draftOnly: true` to leave it in Drafts for you to review;
    - a request for a meeting: `outlook_find_meeting_times` for the attendees,
@@ -190,8 +193,9 @@ An agent can work through new mail end to end without opening Outlook:
    `outlook_list_categories`) and marks read up to 50 messages in one call;
    `outlook_move_message` moves one to another folder.
 4. **Mark it handled** — `outlook_mark_read` (or `isRead: true` on
-   `outlook_update_message`), so the next `outlook_get_unread` returns only
-   what is still new.
+   `outlook_update_message`) on the plain mail you handled, so the next
+   `outlook_get_unread` returns only what is still new. Answered invites are
+   already out of the inbox (see step 2).
 
 Replies, forwards, invite responses and new meetings reach other people, so
 each asks you to confirm first — except a reply saved with `draftOnly: true`

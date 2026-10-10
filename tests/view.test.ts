@@ -239,4 +239,21 @@ describe('recipient cap is documented where it applies', () => {
       await h.close();
     }
   });
+
+  it('outlook_list_events and outlook_get_event say view:"raw" is Outlook\'s record, uncapped', async () => {
+    const { createTestHarness } = await import('@chrischall/mcp-utils/test');
+    const { registerCalendarTools } = await import('../src/tools/calendar.js');
+    const h = await createTestHarness((s) => registerCalendarTools(s, {} as never));
+    try {
+      const tools = await h.listTools();
+      for (const name of ['outlook_list_events', 'outlook_get_event']) {
+        const d = tools.find((t) => t.name === name)?.description ?? '';
+        expect(d, name).toMatch(/view: ?"raw"/);
+        expect(d, name).toMatch(/uncapped/i);
+        expect(d, name).toMatch(/Attendees/);
+      }
+    } finally {
+      await h.close();
+    }
+  });
 });
