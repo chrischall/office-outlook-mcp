@@ -168,6 +168,55 @@ describe('calendar tools', () => {
     await h.close();
   });
 
+  it('selects the decision fields when listing events', async () => {
+    const client = stub();
+    const h = await createTestHarness((s: McpServer) => registerCalendarTools(s, client));
+    await h.callTool('outlook_list_events', { start: 'a', end: 'b' });
+    const calls = (client.get as ReturnType<typeof vi.fn>).mock.calls;
+    const viewCall = calls.find((c: unknown[]) => String(c[0]).includes('/me/calendarview'));
+    const select = String((viewCall?.[1] as { query?: { $select?: string } })?.query?.$select).split(',');
+    for (const field of [
+      'ResponseStatus',
+      'ResponseRequested',
+      'IsOrganizer',
+      'IsCancelled',
+      'Type',
+      'SeriesMasterId',
+      'ShowAs',
+      'IsAllDay',
+    ]) {
+      expect(select, field).toContain(field);
+    }
+    await h.close();
+  });
+
+  it.each(['compact', 'full'])('hands back the decision fields from outlook_get_event (%s)', async (view) => {
+    const client = stub(async () => ({
+      ...event,
+      ResponseStatus: { Response: 'Accepted' },
+      ResponseRequested: true,
+      IsOrganizer: false,
+      IsCancelled: false,
+      IsAllDay: true,
+      Type: 'SeriesMaster',
+      ShowAs: 'Oof',
+    }));
+    const h = await createTestHarness((s: McpServer) => registerCalendarTools(s, client));
+    const out = parseToolResult<Record<string, unknown>>(
+      await h.callTool('outlook_get_event', { id: 'e1', view }),
+    );
+    expect(out).toMatchObject({
+      MyResponse: 'Accepted',
+      ResponseRequested: true,
+      IsOrganizer: false,
+      IsCancelled: false,
+      IsAllDay: true,
+      Type: 'SeriesMaster',
+      ShowAs: 'Oof',
+    });
+    await h.close();
+  });
+
   it('returns the raw event when asked', async () => {
     const client = stub(async () => event);
     const h = await createTestHarness((s: McpServer) => registerCalendarTools(s, client));

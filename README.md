@@ -117,10 +117,13 @@ Everything is optional — with nothing set, the server captures from the browse
 **Write** (ask you to confirm first — see [Confirmations](#confirmations)) —
 `outlook_send_mail`, `outlook_create_draft`, `outlook_mark_read`,
 `outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
-`outlook_update_event`, `outlook_respond_to_invite`, `outlook_reply`.
-Two skip the confirmation when nothing reaches anyone else:
-`outlook_reply` with `draftOnly: true` (the reply stays in Drafts) and
-`outlook_respond_to_invite` with `sendResponse: false` (only your calendar
+`outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
+`outlook_reply`.
+Three skip the confirmation when nothing reaches anyone else:
+`outlook_reply` with `draftOnly: true` (the reply stays in Drafts),
+`outlook_respond_to_invite` with `sendResponse: false`, and
+`outlook_delete_event` on your own appointment with no attendees or on a
+meeting the organizer already cancelled (in each, only your calendar
 changes).
 
 **Meetings** — `outlook_find_meeting_times` asks Outlook's Scheduling
@@ -131,11 +134,18 @@ which `outlook_create_event` accepts unchanged. `outlook_create_event` and
 its join link; pass `teamsMeeting: false` to leave it off. Only the organizer
 can update a meeting. `outlook_respond_to_invite` accepts, tentatively accepts
 or declines an invite, by its message id or its event id.
+`outlook_delete_event` deletes an event you organize — one occurrence by the
+occurrence's id, or the whole series by its series master's id — and sends
+any attendees a cancellation; for an invite you received it refuses and points
+you at declining instead. `outlook_list_events` and `outlook_get_event` show
+what that decision needs in every view: `MyResponse`, `ResponseRequested`,
+`IsOrganizer`, `IsCancelled`, `Type` (SingleInstance, Occurrence, Exception or
+SeriesMaster), `ShowAs` and `IsAllDay`, plus `SeriesMasterId` in the full view.
 
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
-Mutating tools **write nothing** until you confirm (bar the two cases above)
+Mutating tools **write nothing** until you confirm (bar the cases above)
 — see [Confirmations](#confirmations). The preview shows exactly what would be sent
 (action, method, path and body). (`outlook_create_event` first reads the
 mailbox time zone, so its preview can name the zone it would book in; that is

@@ -10,10 +10,7 @@ import type { OutlookEvent } from '../view.js';
 export const EVENT_EXPAND = 'Microsoft.OutlookServices.EventMessage/Event';
 
 /** An invite's event: what is shown at triage and checked before responding. */
-export interface InviteEvent extends OutlookEvent {
-  IsOrganizer?: boolean;
-  ResponseStatus?: { Response?: string };
-}
+export type InviteEvent = OutlookEvent;
 
 /**
  * The invite's event, or undefined when there is none to act on. Outlook

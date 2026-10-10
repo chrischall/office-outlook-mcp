@@ -118,6 +118,55 @@ describe('event projection', () => {
     expect(compactEvent(event)).not.toHaveProperty('Attendees');
     expect(fullEvent(event).Attendees).toEqual([{ Who: 'e@x.y', Response: 'Accepted' }]);
   });
+
+  // Live 2026-10-10 (clearing OOO days): without these an agent could not
+  // tell its own appointment from an invite it had not answered, or one
+  // occurrence from the whole series.
+  const occurrence = {
+    ...event,
+    ResponseStatus: { Response: 'NotResponded', Time: '0001-01-01T00:00:00Z' },
+    ResponseRequested: true,
+    IsOrganizer: false,
+    IsCancelled: false,
+    IsAllDay: false,
+    Type: 'Occurrence',
+    SeriesMasterId: 'master-1',
+    ShowAs: 'Tentative',
+  };
+
+  it('carries the decision fields in the compact view, false values included', () => {
+    expect(compactEvent(occurrence)).toMatchObject({
+      MyResponse: 'NotResponded',
+      ResponseRequested: true,
+      IsOrganizer: false,
+      IsCancelled: false,
+      IsAllDay: false,
+      Type: 'Occurrence',
+      ShowAs: 'Tentative',
+    });
+    // The series link is for the full view; compact stays compact.
+    expect(compactEvent(occurrence)).not.toHaveProperty('SeriesMasterId');
+  });
+
+  it('carries the decision fields and the series link in the full view', () => {
+    expect(fullEvent(occurrence)).toMatchObject({
+      MyResponse: 'NotResponded',
+      ResponseRequested: true,
+      IsOrganizer: false,
+      IsCancelled: false,
+      IsAllDay: false,
+      Type: 'Occurrence',
+      SeriesMasterId: 'master-1',
+      ShowAs: 'Tentative',
+    });
+  });
+
+  it('marks your own meeting as organizer and leaves out what Outlook did not send', () => {
+    const own = compactEvent({ Id: 'e2', IsOrganizer: true, ResponseStatus: { Response: 'Organizer' } });
+    expect(own).toMatchObject({ IsOrganizer: true, MyResponse: 'Organizer' });
+    expect(own).not.toHaveProperty('Type');
+    expect(own).not.toHaveProperty('ResponseRequested');
+  });
 });
 
 describe('folder projection', () => {

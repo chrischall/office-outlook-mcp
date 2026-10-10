@@ -122,8 +122,25 @@ export interface OutlookEvent {
   OnlineMeeting?: { JoinUrl?: string } | null;
   BodyPreview?: string;
   WebLink?: string;
+  /** True on an event the signed-in user organizes (their own appointments included). */
+  IsOrganizer?: boolean;
+  /** The signed-in user's answer: None, Organizer, TentativelyAccepted, Accepted, Declined, NotResponded. */
+  ResponseStatus?: { Response?: string };
+  ResponseRequested?: boolean;
+  /** SingleInstance, Occurrence, Exception or SeriesMaster. */
+  Type?: string;
+  /** On an Occurrence or Exception: the Id of its series. */
+  SeriesMasterId?: string;
 }
 
+/**
+ * Projection of an event. The decision fields — your response, whether you
+ * organize it, whether it is one occurrence of a series, how it shows on your
+ * calendar — are in BOTH views: live 2026-10-10, an agent clearing out-of-office
+ * days could not tell its own appointment from an invite it had not answered
+ * without them. Their booleans are kept when false, since "not the organizer"
+ * is the answer the agent is looking for.
+ */
 export function compactEvent(e: OutlookEvent): Record<string, unknown> {
   return pruned({
     Id: e.Id,
@@ -133,15 +150,20 @@ export function compactEvent(e: OutlookEvent): Record<string, unknown> {
     TimeZone: e.Start?.TimeZone,
     Location: e.Location?.DisplayName || undefined,
     Organizer: addr(e.Organizer),
-    IsAllDay: e.IsAllDay || undefined,
-    IsCancelled: e.IsCancelled || undefined,
+    IsAllDay: e.IsAllDay,
+    IsCancelled: e.IsCancelled,
+    IsOrganizer: e.IsOrganizer,
+    MyResponse: e.ResponseStatus?.Response,
+    ResponseRequested: e.ResponseRequested,
+    Type: e.Type,
+    ShowAs: e.ShowAs,
   });
 }
 
 export function fullEvent(e: OutlookEvent): Record<string, unknown> {
   return pruned({
     ...compactEvent(e),
-    ShowAs: e.ShowAs,
+    SeriesMasterId: e.SeriesMasterId,
     Attendees: e.Attendees?.map((a) =>
       pruned({ Who: addr(a), Response: a.Status?.Response }),
     ),

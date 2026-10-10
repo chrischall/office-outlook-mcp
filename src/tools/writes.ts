@@ -142,6 +142,12 @@ async function writeOrUnknown<T>(
 
 const INVITE_EVENT_SELECT = 'Id,Subject,IsOrganizer,IsCancelled,Start,End,Organizer,ResponseStatus';
 
+/** What outlook_delete_event reads before deciding whether, and how loudly, to delete. */
+type DeletableEvent = InviteEvent & { Attendees?: Attendee[] };
+
+const DELETE_EVENT_SELECT =
+  'Id,Subject,IsOrganizer,IsCancelled,ResponseStatus,Type,SeriesMasterId,Start,End,Organizer,Attendees';
+
 /** Tool input → the action segment Outlook takes and the ResponseStatus it should leave. */
 const INVITE_RESPONSES = {
   accept: { verb: 'accept', status: 'Accepted' },
@@ -853,7 +859,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
 
       if (event?.IsCancelled === true) {
         throw new McpToolError('This meeting has been cancelled; there is nothing to respond to.', {
-          hint: 'Remove it from your calendar in Outlook if it is still shown.',
+          hint: 'Remove it from your calendar with outlook_delete_event if it is still shown.',
         });
       }
       if (event?.IsOrganizer === true || event?.ResponseStatus?.Response === 'Organizer') {
@@ -937,6 +943,105 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ...(got === status
           ? {}
           : { warning: `Outlook accepted the response but the status did not change (still ${got ?? 'unknown'}).` }),
+      });
+    },
+  );
+
+  server.registerTool(
+    'outlook_delete_event',
+    {
+      description:
+        'Delete a calendar event. An occurrence\'s id deletes only that occurrence; a series master\'s id (Type "SeriesMaster" in outlook_get_event) deletes the WHOLE series. Only the organizer can delete a meeting — for an invite you received, decline it with outlook_respond_to_invite instead (a meeting the organizer already cancelled can be removed here). Deleting a meeting that has attendees sends each of them a cancellation, so it is confirmed first; your own appointment with no attendees, or a cancelled meeting, is removed without asking because only your calendar changes. The result is verified by re-reading the event.' +
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' ' +
+        TIMEOUT_SENTENCE +
+        ' ' +
+        CONFIRM_INJECTION_RULE,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      inputSchema: z.object({
+        id: z
+          .string()
+          .min(1)
+          .describe('Event Id from outlook_list_events or outlook_get_event (an occurrence, or a series master)'),
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async ({ id, confirmToken }, ctx) => {
+      const path = `/me/events/${encodeURIComponent(id)}`;
+      // The zone is only for stating the time in the preview; a failed lookup
+      // leaves Outlook's own zone rather than blocking the delete.
+      const zone = await mailboxTimeZone(client);
+      const event = await client.get<DeletableEvent>(
+        `${path}?$select=${DELETE_EVENT_SELECT}`,
+        zone ? { prefer: `outlook.timezone="${zone}"` } : {},
+      );
+
+      const organizer = event?.IsOrganizer === true || event?.ResponseStatus?.Response === 'Organizer';
+      const cancelled = event?.IsCancelled === true;
+      if (!organizer && !cancelled) {
+        throw new McpToolError('Only the organizer can delete this meeting.', {
+          hint:
+            'You are an attendee: deleting your copy would not tell the organizer. To drop it, decline with outlook_respond_to_invite (response: "decline"), which also removes it from your calendar.',
+        });
+      }
+
+      const scope =
+        event?.Type === 'SeriesMaster'
+          ? 'the whole series (every occurrence)'
+          : event?.Type === 'Occurrence' || event?.Type === 'Exception'
+            ? 'only this occurrence (the rest of the series stays)'
+            : 'this event';
+      const attendeeCount = event?.Attendees?.length ?? 0;
+      // An organizer deleting a meeting with attendees sends each a
+      // cancellation. A cancelled meeting (an attendee's leftover copy) or an
+      // appointment with nobody invited changes only this calendar, so — like
+      // outlook_respond_to_invite with sendResponse:false — it needs no confirmation.
+      const notifies = organizer && !cancelled && attendeeCount > 0;
+
+      if (notifies) {
+        const when = `${trimTime(event?.Start?.DateTime) ?? '?'} to ${trimTime(event?.End?.DateTime) ?? '?'}${event?.Start?.TimeZone ? ` (${event.Start.TimeZone})` : ''}`;
+        const gate = await confirmWrite(ctx, {
+          tool: 'outlook_delete_event',
+          action: 'calendar.delete_event',
+          message: 'Review and confirm this deletion (every attendee is sent a cancellation):',
+          summary:
+            `Delete "${event?.Subject ?? id}" ${when} — ${scope}; ` +
+            `${attendeeCount} attendee${attendeeCount === 1 ? '' : 's'} will be sent a cancellation`,
+          // One signed-in mailbox per server process.
+          account: undefined,
+          target: id,
+          request: { method: 'DELETE', path },
+          preview: { scope, attendees: attendeeCount },
+          confirmToken,
+        });
+        if (gate) return gate;
+      }
+
+      const write = await writeOrUnknown(
+        () => client.write('DELETE', path),
+        'the calendar (outlook_get_event)',
+      );
+      if (!write.ok) return write.result;
+
+      // Re-read rather than trust the 204: a 404 is the proof it is gone; any
+      // other failed read (a 5xx, a timeout) says nothing either way.
+      const base = { Id: id, Subject: event?.Subject, scope, cancellationSent: notifies };
+      let after: DeletableEvent | undefined;
+      try {
+        after = await client.get<DeletableEvent>(`${path}?$select=Id`);
+      } catch (e) {
+        if (errorStatusOf(e) === 404) return minifiedResult({ deleted: true, ...base });
+        return minifiedResult({
+          deleted: null,
+          ...base,
+          warning: `Outlook accepted the delete but re-reading the event failed (${e instanceof Error ? e.message : String(e)}), so it is unverified.`,
+        });
+      }
+      return minifiedResult({
+        deleted: false,
+        ...base,
+        warning: `Outlook accepted the delete but the event is still on the calendar${after?.Id ? ` (${after.Id})` : ''}.`,
       });
     },
   );

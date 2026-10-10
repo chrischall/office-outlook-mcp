@@ -14,7 +14,9 @@ import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 import { mailboxTimeZone } from '../timezone.js';
 
 const EVENT_SELECT =
-  'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,OnlineMeeting,BodyPreview';
+  'Id,Subject,Start,End,Location,Organizer,IsAllDay,IsCancelled,ShowAs,OnlineMeetingUrl,OnlineMeeting,BodyPreview,' +
+  // The decision fields (see compactEvent): your response, organizer or not, series or one-off.
+  'IsOrganizer,ResponseStatus,ResponseRequested,Type,SeriesMasterId';
 
 /**
  * An Outlook `DateTimeTimeZone` for a caller-supplied time.

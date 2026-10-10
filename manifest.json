@@ -204,6 +204,10 @@
       "description": "Accept, tentatively accept or decline a meeting invite (asks you to confirm first when the organizer is notified)"
     },
     {
+      "name": "outlook_delete_event",
+      "description": "Delete an event, one occurrence or a whole series you organize (asks you to confirm first when attendees are sent a cancellation)"
+    },
+    {
       "name": "outlook_reply",
       "description": "Reply, reply-all or forward a message, or save it as a draft (asks you to confirm first when sending)"
     },
