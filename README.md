@@ -164,7 +164,10 @@ An agent can work through new mail end to end without opening Outlook:
    call. It does **not** mark anything read. Each item has a `kind`: `mail`,
    `meetingRequest`, `meetingCancelled` or `meetingResponse`; requests and
    cancellations also carry the linked `event` (time, organizer, your current
-   response).
+   response) — or, when the meeting is no longer on your calendar (already
+   declined, cancelled or deleted), a `hint` saying there is nothing to respond
+   to. `to` and `cc` list at most 20 addresses, with `toCount`/`ccCount` when
+   there are more.
 2. **Act on each item** —
    - an invite: `outlook_respond_to_invite` with the message id and
      `accept`, `tentative` or `decline` (and an optional comment);

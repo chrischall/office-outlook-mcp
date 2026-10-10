@@ -32,6 +32,27 @@ export function addrs(list: Recipient[] | undefined): string[] | undefined {
   return list.map((r) => addr(r)).filter((s): s is string => s !== undefined);
 }
 
+/**
+ * The most addresses a recipient list returns. One live invite went to 1,132
+ * people (2026-10-10); listing them all costs a great deal of context and
+ * tells an agent nothing the count does not.
+ */
+export const MAX_RECIPIENTS = 20;
+
+/**
+ * `{ [key]: the first MAX_RECIPIENTS }`, plus `[key]Count` (the full length)
+ * and `[key]Truncated: true` when the list was longer. Absent keys stay
+ * undefined so a projection's pruning drops them.
+ */
+export function cappedRecipients(key: string, list: string[] | undefined): Record<string, unknown> {
+  if (list === undefined || list.length <= MAX_RECIPIENTS) return { [key]: list };
+  return {
+    [key]: list.slice(0, MAX_RECIPIENTS),
+    [`${key}Count`]: list.length,
+    [`${key}Truncated`]: true,
+  };
+}
+
 export interface OutlookMessage {
   Id?: string;
   Subject?: string;
@@ -58,7 +79,7 @@ export function compactMessage(m: OutlookMessage): Record<string, unknown> {
     Id: m.Id,
     Subject: m.Subject,
     From: addr(m.From ?? m.Sender),
-    To: addrs(m.ToRecipients),
+    ...cappedRecipients('To', addrs(m.ToRecipients)),
     Received: m.ReceivedDateTime,
     IsRead: m.IsRead,
     HasAttachments: m.HasAttachments || undefined,
@@ -72,7 +93,7 @@ export function compactMessage(m: OutlookMessage): Record<string, unknown> {
 export function fullMessage(m: OutlookMessage): Record<string, unknown> {
   return pruned({
     ...compactMessage(m),
-    Cc: addrs(m.CcRecipients),
+    ...cappedRecipients('Cc', addrs(m.CcRecipients)),
     Sent: m.SentDateTime,
     Importance: m.Importance,
     IsDraft: m.IsDraft,

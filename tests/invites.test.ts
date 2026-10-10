@@ -48,6 +48,8 @@ function stub(
     goneAfterDecline?: boolean;
     writeError?: Error;
     noEventOnMessage?: boolean;
+    /** The invite message's record, replacing the default `{Id, Event}`. */
+    message?: Ev;
     /** The read-back after the response POST throws this. */
     readBackError?: Error;
   } = {},
@@ -60,6 +62,7 @@ function stub(
     const path = wire(p, o);
     calls.push({ method: 'GET', path });
     if (p.startsWith('/me/messages/')) {
+      if (opts.message) return opts.message;
       return opts.noEventOnMessage ? { Id: 'm-1' } : { Id: 'm-1', Event: stored };
     }
     if (p.startsWith('/me/events/')) {
@@ -143,6 +146,42 @@ describe('outlook_respond_to_invite', () => {
 
   it('refuses a message that is not a meeting invite', async () => {
     const { client, writes } = stub(invite(), { noEventOnMessage: true });
+    const h = await harness(client);
+    const res = await h.callTool('outlook_respond_to_invite', { messageId: 'm-1', response: 'accept' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/not a meeting invite/i);
+    expect(writes()).toHaveLength(0);
+    await h.close();
+  });
+
+  // Live 2026-10-10: an invite already declined (its event gone) still reads
+  // as a MeetingRequest, but its Event expands to an empty object.
+  it.each([
+    ['an empty Event', { Event: {} }],
+    ['no Event at all', {}],
+  ])('says a meeting request with %s is no longer on the calendar', async (_label, extra) => {
+    const message = {
+      '@odata.type': '#Microsoft.OutlookServices.EventMessage',
+      Id: 'm-1',
+      MeetingMessageType: 'MeetingRequest',
+      ...extra,
+    };
+    const { client, writes, calls } = stub(invite(), { message });
+    const h = await harness(client);
+    const res = await h.callTool('outlook_respond_to_invite', { messageId: 'm-1', response: 'accept' });
+    expect(res.isError).toBe(true);
+    const text = JSON.stringify(res);
+    expect(text).toMatch(/no longer on your calendar/i);
+    expect(text).toMatch(/nothing to respond to/i);
+    expect(text).not.toMatch(/not a meeting invite/i);
+    expect(decodeURIComponent(calls[0].path)).toContain('MeetingMessageType');
+    expect(writes()).toHaveLength(0);
+    await h.close();
+  });
+
+  it('still calls a plain message with an empty Event not a meeting invite', async () => {
+    const message = { '@odata.type': '#Microsoft.OutlookServices.Message', Id: 'm-1', Event: {} };
+    const { client, writes } = stub(invite(), { message });
     const h = await harness(client);
     const res = await h.callTool('outlook_respond_to_invite', { messageId: 'm-1', response: 'accept' });
     expect(res.isError).toBe(true);

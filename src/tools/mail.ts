@@ -12,6 +12,7 @@ import type { OutlookClient, QueryParams } from '../client.js';
 import {
   addr,
   addrs,
+  cappedRecipients,
   compactFolder,
   compactMessage,
   fullMessage,
@@ -20,7 +21,7 @@ import {
   type OutlookMessage,
   VIEWS,
 } from '../view.js';
-import { EVENT_EXPAND, type InviteEvent } from './_invite.js';
+import { EVENT_EXPAND, INVITE_GONE, MEETING_MESSAGE_TYPE, resolvedEvent, type InviteEvent } from './_invite.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
@@ -64,7 +65,7 @@ const UNREAD_SELECT = [
   'Categories',
   'Flag',
   'ConversationId',
-  'Microsoft.OutlookServices.EventMessage/MeetingMessageType',
+  MEETING_MESSAGE_TYPE,
 ].join(',');
 
 /** Bodies (and invite events) fetched in parallel, bounded so a 50-row batch cannot burst. */
@@ -118,8 +119,7 @@ function triageEvent(e: InviteEvent): Record<string, unknown> {
 }
 
 /** Set on a request/cancellation whose event did not come back with it. */
-const INVITE_UNRESOLVED_HINT =
-  'invite event not resolved; use outlook_get_message / outlook_respond_to_invite with messageId';
+const INVITE_UNRESOLVED_HINT = `This invite's ${INVITE_GONE}.`;
 
 /**
  * `text` cut to at most `max` UTF-16 units, never between the halves of a
@@ -323,7 +323,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_get_unread',
     {
       description:
-        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id (when the event cannot be resolved the item has a `hint` instead: answer it by messageId). This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the ids you handled, so the next call returns only what is still new. Follow `nextLink` for more.' +
+        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id (when the meeting is no longer on your calendar — already declined, cancelled or deleted — the item has a `hint` instead and there is nothing to respond to). `to`/`cc` list at most 20 addresses; a longer list adds `toCount`/`ccCount` and `toTruncated`/`ccTruncated`. This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the ids you handled, so the next call returns only what is still new. Follow `nextLink` for more.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
@@ -382,8 +382,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           kind,
           receivedAt: m.ReceivedDateTime,
           from: addr(m.From ?? m.Sender),
-          to: addrs(m.ToRecipients),
-          cc: addrs(m.CcRecipients),
+          ...cappedRecipients('to', addrs(m.ToRecipients)),
+          ...cappedRecipients('cc', addrs(m.CcRecipients)),
           subject: m.Subject,
           importance: m.Importance,
           hasAttachments: m.HasAttachments || undefined,
@@ -411,7 +411,8 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
             if (text.length > cap) item.bodyTruncated = true;
           }
           if (wantEvent) {
-            if (one.Event) item.event = triageEvent(one.Event);
+            const event = resolvedEvent(one.Event);
+            if (event) item.event = triageEvent(event);
             else item.hint = INVITE_UNRESOLVED_HINT;
           }
         } catch (e) {

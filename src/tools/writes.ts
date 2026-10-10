@@ -13,7 +13,14 @@ import {
 } from '@chrischall/mcp-utils';
 import { isCredentialFailure, type OutlookClient } from '../client.js';
 import { mailboxTimeZone } from '../timezone.js';
-import { EVENT_EXPAND, type InviteEvent } from './_invite.js';
+import { cappedRecipients, MAX_RECIPIENTS } from '../view.js';
+import {
+  EVENT_EXPAND,
+  isMeetingMessage,
+  MEETING_MESSAGE_TYPE,
+  resolvedEvent,
+  type InviteEvent,
+} from './_invite.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
 const recipientList = z
@@ -818,13 +825,21 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
 
       let event: InviteEvent | undefined;
       if (messageId !== undefined) {
-        // A plain message has no Event to expand, which is how a non-invite shows.
-        const msg = await client.get<{ Event?: InviteEvent }>(
+        // A plain message has no Event to expand, which is how a non-invite
+        // shows. An invite whose meeting is gone (already declined, cancelled
+        // or deleted) is still an EventMessage, but expands an empty Event.
+        const msg = await client.get<{ Event?: InviteEvent; MeetingMessageType?: string; '@odata.type'?: string }>(
           `/me/messages/${encodeURIComponent(messageId)}`,
-          { query: { $select: 'Id', $expand: EVENT_EXPAND } },
+          { query: { $select: `Id,${MEETING_MESSAGE_TYPE}`, $expand: EVENT_EXPAND } },
         );
-        event = msg?.Event;
-        if (!event?.Id) {
+        event = resolvedEvent(msg?.Event);
+        if (!event) {
+          if (isMeetingMessage(msg)) {
+            throw new McpToolError(
+              "This invite's meeting is no longer on your calendar (already declined, cancelled or deleted) — there is nothing to respond to.",
+              { hint: "Mark the invite read or file it; answering it again is not possible." },
+            );
+          }
           throw new McpToolError('That message is not a meeting invite.', {
             hint: 'Only messages outlook_get_unread marks kind "meetingRequest" carry an event to answer.',
           });
@@ -1014,7 +1029,11 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       const subject = `${prefix}${orig?.Subject ?? ''}`;
       const path = `${base}/${send}`;
       const payload = { Comment: comment, ...forwardTo };
-      const who = [...recipients.to, ...recipients.cc.map((c) => `cc ${c}`)].join(', ');
+      const everyone = [...recipients.to, ...recipients.cc.map((c) => `cc ${c}`)];
+      const who =
+        everyone.length > MAX_RECIPIENTS
+          ? `${everyone.slice(0, MAX_RECIPIENTS).join(', ')} and ${(everyone.length - MAX_RECIPIENTS).toLocaleString('en-US')} more`
+          : everyone.join(', ');
       const gate = await confirmWrite(ctx, {
         tool: 'outlook_reply',
         action: `mail.${send}`,
@@ -1034,7 +1053,13 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       if (!sent.ok) return sent.result;
       // Like sendmail, these return 202 with no body: nothing to re-read. The
       // subject is the original sender's text, so it goes back fenced.
-      return mailboxUntrusted({ sent: true, mode, subject, to: recipients.to, cc: recipients.cc });
+      return mailboxUntrusted({
+        sent: true,
+        mode,
+        subject,
+        ...cappedRecipients('to', recipients.to),
+        ...cappedRecipients('cc', recipients.cc),
+      });
     },
   );
 }

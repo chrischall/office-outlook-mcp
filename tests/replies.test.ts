@@ -103,6 +103,26 @@ describe('outlook_reply — sending', () => {
     await h.close();
   });
 
+  it('caps a huge reply-all audience in the preview and the result, with the full count', async () => {
+    const crowd = Array.from({ length: 1132 }, (_, i) => addr(`u${i}@example.test`));
+    const { client } = stub({ msg: original({ ToRecipients: crowd, CcRecipients: crowd.slice(0, 30).map((_, i) => addr(`c${i}@example.test`)) }) });
+    const h = await harness(client);
+    const preview = JSON.stringify(
+      parseToolResult(await h.callTool('outlook_reply', { messageId: 'm-1', mode: 'replyAll', comment: 'ok' })),
+    );
+    expect(preview).toMatch(/u0@example\.test/);
+    expect(preview).not.toMatch(/u1131@example\.test/);
+    expect(preview).toMatch(/more/);
+    const body = parseToolResult<Rec>(await confirmed(h, { messageId: 'm-1', mode: 'replyAll', comment: 'ok' }));
+    // alice (the sender) plus 1,132 To recipients.
+    expect(body.to).toHaveLength(20);
+    expect(body.toCount).toBe(1133);
+    expect(body.toTruncated).toBe(true);
+    expect(body.cc).toHaveLength(20);
+    expect(body.ccCount).toBe(30);
+    await h.close();
+  });
+
   it('replies to the Reply-To address when the original sets one', async () => {
     const { client } = stub({ msg: original({ ReplyTo: [addr('list@example.test')] }) });
     const h = await harness(client);

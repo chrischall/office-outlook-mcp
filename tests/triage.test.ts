@@ -53,7 +53,7 @@ const EVENT = {
 
 function stub(
   list: Record<string, unknown>[],
-  opts: { body?: string; failId?: string; nextLink?: string; noEvent?: boolean } = {},
+  opts: { body?: string; failId?: string; nextLink?: string; noEvent?: boolean; emptyEvent?: boolean } = {},
 ) {
   const paths: string[] = [];
   let inFlight = 0;
@@ -71,7 +71,7 @@ function stub(
     const id = decodeURIComponent(p.split('/me/messages/')[1] ?? '');
     if (id === opts.failId) throw new Error('boom');
     const out: Record<string, unknown> = { Id: id, Body: { ContentType: 'Text', Content: opts.body ?? `  body of ${id}  ` } };
-    if (decodeURIComponent(path).includes('EventMessage/Event') && !opts.noEvent) out.Event = EVENT;
+    if (decodeURIComponent(path).includes('EventMessage/Event') && !opts.noEvent) out.Event = opts.emptyEvent ? {} : EVENT;
     return out;
   });
   const getAbsolute = vi.fn(async () => ({ value: [] }));
@@ -215,15 +215,43 @@ describe('outlook_get_unread', () => {
     expect(out.items[0]).not.toHaveProperty('body');
   });
 
-  it('says how to answer an invite whose event did not resolve', async () => {
-    const s = stub([REQUEST, CANCELLED, MAIL], { noEvent: true });
+  // Live 2026-10-10: a declined invite whose event is gone comes back with
+  // `Event: {}` — no Id, nothing to act on, same as no Event at all.
+  it.each([
+    ['missing', { noEvent: true }],
+    ['an empty object', { emptyEvent: true }],
+  ])('says an invite whose event is %s is no longer on the calendar', async (_label, opts) => {
+    const s = stub([REQUEST, CANCELLED, MAIL], opts);
     const out = parseToolResult<Out>(await run(s.client));
     for (const item of out.items.slice(0, 2)) {
       expect(item).not.toHaveProperty('event');
-      expect(String(item.hint)).toMatch(/invite event not resolved/);
-      expect(String(item.hint)).toMatch(/outlook_respond_to_invite/);
+      expect(String(item.hint)).toMatch(/no longer on your calendar/);
+      expect(String(item.hint)).toMatch(/declined, cancelled, or deleted/);
+      expect(String(item.hint)).toMatch(/nothing to respond to/);
     }
     expect(out.items[2]).not.toHaveProperty('hint');
+  });
+
+  it('caps a huge recipient list at 20, with the full count', async () => {
+    const crowd = Array.from({ length: 1132 }, (_, i) => who(`User${i}`));
+    const s = stub([{ ...MAIL, ToRecipients: crowd, CcRecipients: crowd.slice(0, 25) }]);
+    const out = parseToolResult<Out>(await run(s.client, { includeBody: false }));
+    const item = out.items[0];
+    expect(item.to).toHaveLength(20);
+    expect((item.to as string[])[0]).toBe('User0 <user0@example.test>');
+    expect(item.toCount).toBe(1132);
+    expect(item.toTruncated).toBe(true);
+    expect(item.cc).toHaveLength(20);
+    expect(item.ccCount).toBe(25);
+    expect(item.ccTruncated).toBe(true);
+  });
+
+  it('leaves a short recipient list uncounted', async () => {
+    const s = stub([MAIL]);
+    const out = parseToolResult<Out>(await run(s.client, { includeBody: false }));
+    expect(out.items[0].to).toEqual(['Me <me@example.test>']);
+    expect(out.items[0]).not.toHaveProperty('toCount');
+    expect(out.items[0]).not.toHaveProperty('toTruncated');
   });
 
   it('falls back to @odata.type when MeetingMessageType is absent', async () => {

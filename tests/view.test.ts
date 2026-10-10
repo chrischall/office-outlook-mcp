@@ -5,6 +5,7 @@ import {
   compactMessage,
   fullEvent,
   fullMessage,
+  MAX_RECIPIENTS,
   projectCollection,
   VIEWS,
 } from '../src/view.js';
@@ -63,6 +64,31 @@ describe('message projection', () => {
     expect(
       compactMessage({ Sender: { EmailAddress: { Address: 's@x.y' } } }).From,
     ).toBe('s@x.y');
+  });
+});
+
+describe('recipient cap', () => {
+  const crowd = Array.from({ length: 1132 }, (_, i) => ({ EmailAddress: { Address: `u${i}@example.com` } }));
+
+  it('keeps at most MAX_RECIPIENTS of To and Cc, with the full count', () => {
+    expect(MAX_RECIPIENTS).toBe(20);
+    const f = fullMessage({ ...message, ToRecipients: crowd, CcRecipients: crowd.slice(0, 21) });
+    expect(f.To).toHaveLength(20);
+    expect(f.ToCount).toBe(1132);
+    expect(f.ToTruncated).toBe(true);
+    expect(f.Cc).toHaveLength(20);
+    expect(f.CcCount).toBe(21);
+    expect(f.CcTruncated).toBe(true);
+    const c = compactMessage({ ...message, ToRecipients: crowd });
+    expect(c.To).toHaveLength(20);
+    expect(c.ToCount).toBe(1132);
+  });
+
+  it('adds no count to a list of exactly MAX_RECIPIENTS', () => {
+    const f = fullMessage({ ...message, ToRecipients: crowd.slice(0, 20) });
+    expect(f.To).toHaveLength(20);
+    expect(f).not.toHaveProperty('ToCount');
+    expect(f).not.toHaveProperty('ToTruncated');
   });
 });
 
