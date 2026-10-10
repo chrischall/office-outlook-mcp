@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.4.1...v0.5.0) (2026-10-10)
+
+
+### Features
+
+* triage unread mail, answer invites, reply, and manage calendar events ([#61](https://github.com/chrischall/office-outlook-mcp/issues/61)) ([09e9a61](https://github.com/chrischall/office-outlook-mcp/commit/09e9a61524ec93b83842895a14d190e5d4454e68))
+
 ## [0.4.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.4.0...v0.4.1) (2026-10-09)
 
 
