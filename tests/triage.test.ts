@@ -51,7 +51,10 @@ const EVENT = {
   IsCancelled: false,
 };
 
-function stub(list: Record<string, unknown>[], opts: { body?: string; failId?: string; nextLink?: string } = {}) {
+function stub(
+  list: Record<string, unknown>[],
+  opts: { body?: string; failId?: string; nextLink?: string; noEvent?: boolean } = {},
+) {
   const paths: string[] = [];
   let inFlight = 0;
   let peak = 0;
@@ -68,7 +71,7 @@ function stub(list: Record<string, unknown>[], opts: { body?: string; failId?: s
     const id = decodeURIComponent(p.split('/me/messages/')[1] ?? '');
     if (id === opts.failId) throw new Error('boom');
     const out: Record<string, unknown> = { Id: id, Body: { ContentType: 'Text', Content: opts.body ?? `  body of ${id}  ` } };
-    if (decodeURIComponent(path).includes('EventMessage/Event')) out.Event = EVENT;
+    if (decodeURIComponent(path).includes('EventMessage/Event') && !opts.noEvent) out.Event = EVENT;
     return out;
   });
   const getAbsolute = vi.fn(async () => ({ value: [] }));
@@ -162,6 +165,14 @@ describe('outlook_get_unread', () => {
     expect(out.items[0].bodyTruncated).toBe(true);
   });
 
+  it('never cuts a body between the two halves of a surrogate pair', async () => {
+    // U+1F600 is two UTF-16 code units; a cut at 100 would land between them.
+    const s = stub([MAIL], { body: `${'a'.repeat(99)}\u{1F600}${'b'.repeat(50)}` });
+    const out = parseToolResult<Out>(await run(s.client, { maxBodyChars: 100 }));
+    expect(out.items[0].body).toBe('a'.repeat(99));
+    expect(out.items[0].bodyTruncated).toBe(true);
+  });
+
   it('skips the per-message fetch for plain mail when includeBody is false', async () => {
     const s = stub([MAIL]);
     const out = parseToolResult<Out>(await run(s.client, { includeBody: false }));
@@ -202,6 +213,17 @@ describe('outlook_get_unread', () => {
     expect(s.paths).toHaveLength(2);
     expect(out.items[0].event).toMatchObject({ id: 'ev-1' });
     expect(out.items[0]).not.toHaveProperty('body');
+  });
+
+  it('says how to answer an invite whose event did not resolve', async () => {
+    const s = stub([REQUEST, CANCELLED, MAIL], { noEvent: true });
+    const out = parseToolResult<Out>(await run(s.client));
+    for (const item of out.items.slice(0, 2)) {
+      expect(item).not.toHaveProperty('event');
+      expect(String(item.hint)).toMatch(/invite event not resolved/);
+      expect(String(item.hint)).toMatch(/outlook_respond_to_invite/);
+    }
+    expect(out.items[2]).not.toHaveProperty('hint');
   });
 
   it('falls back to @odata.type when MeetingMessageType is absent', async () => {

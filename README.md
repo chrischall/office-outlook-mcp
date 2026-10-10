@@ -148,7 +148,8 @@ Mail and event text is written by other people, so `outlook_list_messages`,
 envelope — `untrusted_content: true` plus a `note` telling the model to treat
 the text as data, never instructions (a `view: raw` record that carries its
 own `untrusted_content`/`note` key is nested under `data`, so it cannot
-overwrite the envelope).
+overwrite the envelope). `outlook_reply` returns a sent reply's subject — the
+original sender's text — inside the same envelope.
 On a client that cannot show a confirmation prompt, the confirmToken is still
 something the model passes back itself, so keep `MCP_CONFIRM_MODE=ask-user`
 (the default) and approve each preview in chat — or use a client that asks you
@@ -180,7 +181,9 @@ An agent can work through new mail end to end without opening Outlook:
    what is still new.
 
 Replies, forwards, invite responses and new meetings reach other people, so
-each asks you to confirm first.
+each asks you to confirm first — except a reply saved with `draftOnly: true`
+(it stays in Drafts until you send it) and an invite response with
+`sendResponse: false` (only your calendar changes; the organizer is not told).
 
 ## Confirmations
 

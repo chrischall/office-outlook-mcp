@@ -16,11 +16,11 @@ import {
   compactMessage,
   fullMessage,
   projectCollection,
-  type OutlookEvent,
   type OutlookFolder,
   type OutlookMessage,
   VIEWS,
 } from '../view.js';
+import { EVENT_EXPAND, type InviteEvent } from './_invite.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
@@ -67,9 +67,6 @@ const UNREAD_SELECT = [
   'Microsoft.OutlookServices.EventMessage/MeetingMessageType',
 ].join(',');
 
-/** The invite's calendar item, inlined on the message it arrived as. */
-const EVENT_EXPAND = 'Microsoft.OutlookServices.EventMessage/Event';
-
 /** Bodies (and invite events) fetched in parallel, bounded so a 50-row batch cannot burst. */
 const BODY_CONCURRENCY = 4;
 
@@ -79,10 +76,6 @@ interface UnreadRow extends OutlookMessage {
   '@odata.type'?: string;
   MeetingMessageType?: string;
   Flag?: { FlagStatus?: string };
-}
-
-interface InviteEvent extends OutlookEvent {
-  ResponseStatus?: { Response?: string };
 }
 
 /**
@@ -122,6 +115,19 @@ function triageEvent(e: InviteEvent): Record<string, unknown> {
     responseStatus: e.ResponseStatus?.Response,
     isCancelled: e.IsCancelled,
   });
+}
+
+/** Set on a request/cancellation whose event did not come back with it. */
+const INVITE_UNRESOLVED_HINT =
+  'invite event not resolved; use outlook_get_message / outlook_respond_to_invite with messageId';
+
+/**
+ * `text` cut to at most `max` UTF-16 units, never between the halves of a
+ * surrogate pair (which would leave a lone, unprintable half at the end).
+ */
+function truncateChars(text: string, max: number): string {
+  const end = /[\uD800-\uDBFF]/.test(text.charAt(max - 1)) ? max - 1 : max;
+  return text.slice(0, end);
 }
 
 function stripUndefined(o: Record<string, unknown>): Record<string, unknown> {
@@ -170,6 +176,23 @@ function isImage(contentType: string): boolean {
 
 function isText(contentType: string, name: string): boolean {
   return TEXT_TYPE.test(contentType) || /svg/i.test(contentType) || TEXT_EXT.test(name);
+}
+
+/** Decoded size of a base64 string, without decoding it (an upper bound if it has stray characters). */
+function base64DecodedLength(b64: string): number {
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  return Math.floor((b64.length * 3) / 4) - padding;
+}
+
+/**
+ * The largest cut at or below `max` that does not split a UTF-8 character:
+ * back off while the byte at the cut is a continuation byte (10xxxxxx).
+ */
+function utf8Boundary(buf: Buffer, max: number): number {
+  if (buf.length <= max) return buf.length;
+  let end = max;
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+  return end;
 }
 
 /** `ReceivedDateTime ge` literal: OData wants it unquoted, and seconds are precision enough. */
@@ -300,7 +323,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_get_unread',
     {
       description:
-        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id. This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the ids you handled, so the next call returns only what is still new. Follow `nextLink` for more.' +
+        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id (when the event cannot be resolved the item has a `hint` instead: answer it by messageId). This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the ids you handled, so the next call returns only what is still new. Follow `nextLink` for more.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
@@ -384,10 +407,13 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           );
           if (wantBody) {
             const text = (one.Body?.Content ?? '').trim();
-            item.body = text.length > cap ? text.slice(0, cap) : text;
+            item.body = text.length > cap ? truncateChars(text, cap) : text;
             if (text.length > cap) item.bodyTruncated = true;
           }
-          if (wantEvent && one.Event) item.event = triageEvent(one.Event);
+          if (wantEvent) {
+            if (one.Event) item.event = triageEvent(one.Event);
+            else item.hint = INVITE_UNRESOLVED_HINT;
+          }
         } catch (e) {
           // One unreadable message must not cost the agent the whole batch.
           item.error = e instanceof Error ? e.message : String(e);
@@ -483,19 +509,20 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         out.hint = 'Outlook returned no content for this attachment.';
         return mailboxUntrusted(out);
       }
-      const buf = Buffer.from(bytes, 'base64');
-      // Size is Outlook's figure for the whole record; the decoded bytes are the real test.
-      if (buf.length > MAX_INLINE_BYTES) {
+      // Size is Outlook's figure for the whole record and can understate the
+      // file; the base64 length bounds the real size, so judge it before decoding.
+      if (base64DecodedLength(bytes) > MAX_INLINE_BYTES) {
         out.hint = 'Content is not inlined above 5 MB. Open it in Outlook to read it.';
         return mailboxUntrusted(out);
       }
+      const buf = Buffer.from(bytes, 'base64');
       out.inlined = true;
       if (image) {
         // The name is the sender's text, so the metadata keeps its envelope; the image follows it.
         const env = mailboxUntrusted(out);
         return { ...env, content: [...env.content, ...imageResult(bytes, contentType).content] };
       }
-      out.text = buf.subarray(0, MAX_TEXT_BYTES).toString('utf8');
+      out.text = buf.subarray(0, utf8Boundary(buf, MAX_TEXT_BYTES)).toString('utf8');
       if (buf.length > MAX_TEXT_BYTES) out.textTruncated = true;
       return mailboxUntrusted(out);
     },

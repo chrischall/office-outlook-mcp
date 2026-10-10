@@ -5,13 +5,16 @@ import {
   CONFIRM_INJECTION_RULE,
   confirmTokenParam,
   confirmWrite,
+  errorStatusOf,
   mapWithConcurrency,
   McpToolError,
   minifiedResult,
   WriteOutcomeUnknownError,
 } from '@chrischall/mcp-utils';
-import type { OutlookClient } from '../client.js';
+import { isCredentialFailure, type OutlookClient } from '../client.js';
 import { mailboxTimeZone } from '../timezone.js';
+import { EVENT_EXPAND, type InviteEvent } from './_invite.js';
+import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
 const recipientList = z
   .array(z.string().min(3))
@@ -130,21 +133,7 @@ async function writeOrUnknown<T>(
   }
 }
 
-/** The invite's calendar item, inlined on the message it arrived as. */
-const INVITE_EVENT_EXPAND = 'Microsoft.OutlookServices.EventMessage/Event';
-
 const INVITE_EVENT_SELECT = 'Id,Subject,IsOrganizer,IsCancelled,Start,End,Organizer,ResponseStatus';
-
-interface InviteEvent {
-  Id?: string;
-  Subject?: string;
-  IsOrganizer?: boolean;
-  IsCancelled?: boolean;
-  Start?: { DateTime?: string; TimeZone?: string };
-  End?: { DateTime?: string; TimeZone?: string };
-  Organizer?: { EmailAddress?: { Address?: string; Name?: string } };
-  ResponseStatus?: { Response?: string };
-}
 
 /** Tool input → the action segment Outlook takes and the ResponseStatus it should leave. */
 const INVITE_RESPONSES = {
@@ -411,7 +400,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_update_message',
     {
       description:
-        'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_get_unread → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest. Only your mailbox changes — nobody is notified.' +
+        'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_get_unread → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Duplicate ids are collapsed, so each message is written once. Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest, but a rejected or missing credential fails the whole call. Only your mailbox changes — nobody is notified.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -498,6 +487,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
             ? { id, ok: false, error: `Outlook accepted the write but these did not change: ${unchanged.join(', ')}.` }
             : { id, ok: true };
         } catch (e) {
+          // A rejected or missing credential fails every id alike: stop and say so once.
+          if (isCredentialFailure(e)) throw e;
           // PATCH is idempotent, so a failed id is safe to send again as-is.
           return { id, ok: false, error: e instanceof Error ? e.message : String(e) };
         }
@@ -830,7 +821,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         // A plain message has no Event to expand, which is how a non-invite shows.
         const msg = await client.get<{ Event?: InviteEvent }>(
           `/me/messages/${encodeURIComponent(messageId)}`,
-          { query: { $select: 'Id', $expand: INVITE_EVENT_EXPAND } },
+          { query: { $select: 'Id', $expand: EVENT_EXPAND } },
         );
         event = msg?.Event;
         if (!event?.Id) {
@@ -890,14 +881,15 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       if (!write.ok) return write.result;
 
       // Re-read rather than trust the 202. Declining can remove the event from
-      // the calendar, so a failed read-back after a decline is the expected end.
+      // the calendar, so a 404 after a decline is the expected end; any other
+      // failed read-back (a 5xx, a timeout) says nothing either way.
       let after: InviteEvent | undefined;
       try {
         after = await client.get<InviteEvent>(
           `/me/events/${encodeURIComponent(id)}?$select=ResponseStatus`,
         );
       } catch (e) {
-        if (response === 'decline') {
+        if (response === 'decline' && errorStatusOf(e) === 404) {
           return minifiedResult({
             responded: true,
             eventId: id,
@@ -936,7 +928,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' The preview shows the recipients, subject and comment. ' +
         TIMEOUT_SENTENCE +
         ' ' +
-        CONFIRM_INJECTION_RULE,
+        CONFIRM_INJECTION_RULE +
+        ' ' +
+        UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       inputSchema: z.object({
         messageId: z.string().min(1).describe('Id of the message to answer or forward'),
@@ -968,20 +962,40 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       if (draftOnly === true) {
         // Nothing leaves the mailbox: the draft sits in Drafts until sent from
         // Outlook, so there is no one to protect with a confirmation.
-        const created = await client.write<{ Id?: string; WebLink?: string; Body?: { ContentType?: string; Content?: string } }>(
-          'POST',
-          `${base}/${draft}`,
-          {},
+        // The create is not idempotent: a retry after a lost answer leaves a
+        // second draft, so an unconfirmed one says to look in Drafts first.
+        const create = await writeOrUnknown(
+          () =>
+            client.write<{ Id?: string; WebLink?: string; Body?: { ContentType?: string; Content?: string } }>(
+              'POST',
+              `${base}/${draft}`,
+              {},
+            ),
+          'Drafts',
         );
+        if (!create.ok) return create.result;
+        const created = create.value;
         if (!created?.Id) {
           throw new McpToolError('Outlook did not return the draft it created.', {
             hint: 'Check the Drafts folder before trying again.',
           });
         }
-        await client.write('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
-          Body: bodyWithComment(created.Body, comment),
-          ...forwardTo,
-        });
+        try {
+          await client.write('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
+            Body: bodyWithComment(created.Body, comment),
+            ...forwardTo,
+          });
+        } catch (e) {
+          // The draft exists either way; an error here would hide its id and
+          // invite a retry that leaves a second one.
+          return minifiedResult({
+            drafted: true,
+            mode,
+            draftId: created.Id,
+            WebLink: created.WebLink,
+            warning: `The draft was created but adding your comment${mode === 'forward' ? ' and recipients' : ''} failed (${e instanceof Error ? e.message : String(e)}). Edit it in Drafts, or delete it before trying again.`,
+          });
+        }
         return minifiedResult({ drafted: true, mode, draftId: created.Id, WebLink: created.WebLink });
       }
 
@@ -1018,8 +1032,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       if (gate) return gate;
       const sent = await writeOrUnknown(() => client.write('POST', path, payload), 'Sent Items');
       if (!sent.ok) return sent.result;
-      // Like sendmail, these return 202 with no body: nothing to re-read.
-      return minifiedResult({ sent: true, mode, subject, to: recipients.to, cc: recipients.cc });
+      // Like sendmail, these return 202 with no body: nothing to re-read. The
+      // subject is the original sender's text, so it goes back fenced.
+      return mailboxUntrusted({ sent: true, mode, subject, to: recipients.to, cc: recipients.cc });
     },
   );
 }

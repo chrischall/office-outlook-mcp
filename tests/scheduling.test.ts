@@ -178,6 +178,10 @@ describe('outlook_find_meeting_times', () => {
       await h.callTool('outlook_find_meeting_times', { ...args, view: 'raw' }),
     );
     expect(res.MeetingTimeSuggestions).toHaveLength(1);
+    expect(JSON.stringify(res)).not.toContain('createEventArgs');
+    // …and the description says so, so nobody asks for raw expecting both.
+    const tool = (await h.listTools()).find((t) => t.name === 'outlook_find_meeting_times');
+    expect(tool?.description).toMatch(/view: ?'raw'.*createEventArgs|createEventArgs.*view: ?'raw'/);
     await h.close();
   });
 

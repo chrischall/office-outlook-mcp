@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { McpToolError } from '@chrischall/mcp-utils';
 import { registerWriteTools } from '../src/tools/writes.js';
 import { registerDirectoryTools } from '../src/tools/directory.js';
 import type { OutlookClient } from '../src/client.js';
@@ -24,7 +25,18 @@ interface Stored {
  * merges into it and echoes the message back, as Outlook does. `ignore` makes
  * a PATCH succeed without changing anything; `fail` makes it throw.
  */
-function stub(opts: { messages?: Record<string, Stored>; ignore?: string[]; fail?: string[]; echo?: boolean } = {}) {
+function stub(
+  opts: {
+    messages?: Record<string, Stored>;
+    ignore?: string[];
+    fail?: string[];
+    echo?: boolean;
+    /** Ids whose GET throws though the message exists. */
+    getFail?: string[];
+    /** Ids whose PATCH throws this error instead of the generic one. */
+    failWith?: Record<string, Error>;
+  } = {},
+) {
   const store: Record<string, Stored> = structuredClone(
     opts.messages ?? { 'm-1': { IsRead: false, Categories: [] }, 'm-2': { IsRead: false, Categories: [] } },
   );
@@ -33,12 +45,14 @@ function stub(opts: { messages?: Record<string, Stored>; ignore?: string[]; fail
   const get = vi.fn(async (path: string) => {
     calls.push({ method: 'GET', path });
     const msg = store[idOf(path)];
+    if (opts.getFail?.includes(idOf(path))) throw new Error('read failed');
     if (!msg) throw new Error('404 not found');
     return { Id: idOf(path), ...msg };
   });
   const write = vi.fn(async (method: string, path: string, body?: unknown) => {
     calls.push({ method, path, body });
     const id = idOf(path);
+    if (opts.failWith?.[id]) throw opts.failWith[id];
     if (opts.fail?.includes(id)) throw new Error('Outlook said no');
     if (!opts.ignore?.includes(id)) Object.assign(store[id], body as Stored);
     return opts.echo === false ? undefined : { Id: id, ...store[id] };
@@ -160,6 +174,86 @@ describe('outlook_update_message', () => {
     const out = parseToolResult<Result>(await confirmed(h, { messageIds: ['m-1'], isRead: true }));
     expect(out.results?.[0]).toEqual({ id: 'm-1', ok: true });
     expect(calls.some((c) => c.method === 'GET' && c.path.includes('/me/messages/m-1'))).toBe(true);
+    await h.close();
+  });
+
+  it('aborts the whole call when Outlook rejects the token mid-batch', async () => {
+    // A 401 is not about one message: every later id would fail the same way,
+    // and the agent needs one clear "re-authenticate" error, not 50 rows.
+    const rejected = new McpToolError('Outlook rejected the access token (401).', {
+      hint: 'Open a signed-in Outlook tab and retry.',
+      status: 401,
+      kind: 'credential_rejected',
+    });
+    const { client } = stub({
+      messages: { 'm-1': {}, 'm-2': {}, 'm-3': {} },
+      failWith: { 'm-2': rejected },
+    });
+    const h = await harness(client);
+    const res = await confirmed(h, { messageIds: ['m-1', 'm-2', 'm-3'], isRead: true });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/rejected the access token/);
+    await h.close();
+  });
+
+  it('aborts the whole call when no credential is configured', async () => {
+    const missing = new McpToolError('No Outlook credential is configured.', { kind: 'no_credential' });
+    const { client } = stub({ failWith: { 'm-1': missing } });
+    const h = await harness(client);
+    const res = await confirmed(h, { messageIds: ['m-1'], flag: 'flagged' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/No Outlook credential/);
+    await h.close();
+  });
+
+  it('removes categories on their own, leaving the rest of each list', async () => {
+    const { client, patches } = stub({
+      messages: { 'm-1': { Categories: ['Keep', 'Drop'] }, 'm-2': { Categories: ['drop'] } },
+    });
+    const h = await harness(client);
+    const res = parseToolResult<Result>(
+      await confirmed(h, { messageIds: ['m-1', 'm-2'], removeCategories: ['Drop'] }),
+    );
+    const byId = Object.fromEntries(patches().map((p) => [p.path, p.body]));
+    expect(byId['/me/messages/m-1']).toEqual({ Categories: ['Keep'] });
+    expect(byId['/me/messages/m-2']).toEqual({ Categories: [] });
+    expect(res.updated).toBe(2);
+    await h.close();
+  });
+
+  it('collapses duplicate ids so each message is written once', async () => {
+    const { client, patches } = stub();
+    const h = await harness(client);
+    const first = parseToolResult<{ preview?: unknown }>(
+      await h.callTool('outlook_update_message', { messageIds: ['m-1', 'm-1', 'm-2'], isRead: true }),
+    );
+    expect(JSON.stringify(first)).toMatch(/2 messages/);
+    const res = parseToolResult<Result>(await confirmed(h, { messageIds: ['m-1', 'm-1', 'm-2'], isRead: true }));
+    expect(patches()).toHaveLength(2);
+    expect(res.results?.map((r) => r.id)).toEqual(['m-1', 'm-2']);
+    await h.close();
+  });
+
+  it('reports a failed read of the current categories against that id, writing nothing for it', async () => {
+    const { client, patches } = stub({
+      messages: { 'm-1': { Categories: [] }, 'm-2': { Categories: [] } },
+      getFail: ['m-1'],
+    });
+    const h = await harness(client);
+    const res = await confirmed(h, { messageIds: ['m-1', 'm-2'], addCategories: ['New'] });
+    expect(res.isError).toBeFalsy();
+    const out = parseToolResult<Result>(res);
+    expect(patches().map((p) => p.path)).toEqual(['/me/messages/m-2']);
+    expect(out.results?.[0]).toMatchObject({ id: 'm-1', ok: false, error: expect.stringMatching(/read failed/) });
+    expect(out.results?.[1]).toEqual({ id: 'm-2', ok: true });
+    await h.close();
+  });
+
+  it('says in its description that duplicate ids are collapsed', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const tool = (await h.client.listTools()).tools.find((t) => t.name === 'outlook_update_message');
+    expect(tool?.description).toMatch(/duplicate ids/i);
     await h.close();
   });
 

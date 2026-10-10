@@ -178,7 +178,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     'outlook_find_meeting_times',
     {
       description:
-        "Find times when people can meet — Outlook's Scheduling Assistant. Give the attendees, a search window and a duration; Outlook checks everyone's free/busy (and the signed-in user's, as organizer) and returns ranked candidate slots with each attendee's availability. By default only working hours are searched. Use this to answer \"when can X and Y meet?\"; then book with outlook_create_event — each suggestion carries `createEventArgs` (times, zone and attendees; `subject` too when given here) to pass to it as-is. `start`/`end` are local wall-clock times in `timeZone` (default: the mailbox zone), and returned slots are in that zone too." +
+        "Find times when people can meet — Outlook's Scheduling Assistant. Give the attendees, a search window and a duration; Outlook checks everyone's free/busy (and the signed-in user's, as organizer) and returns ranked candidate slots with each attendee's availability. By default only working hours are searched. Use this to answer \"when can X and Y meet?\"; then book with outlook_create_event — each suggestion carries `createEventArgs` (times, zone and attendees; `subject` too when given here) to pass to it as-is. `start`/`end` are local wall-clock times in `timeZone` (default: the mailbox zone), and returned slots are in that zone too. view: 'raw' returns Outlook's response as-is, without `createEventArgs`." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({

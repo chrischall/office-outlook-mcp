@@ -93,6 +93,41 @@ describe('outlook_get_attachment', () => {
     expect(out.textTruncated).toBe(true);
   });
 
+  it('never splits a multi-byte UTF-8 character at the 200 KB cut', async () => {
+    // 'é' is two bytes; placed so the cut lands after its first byte.
+    const big = `${'x'.repeat(200 * 1024 - 1)}é${'y'.repeat(100)}`;
+    const s = stub({ '@odata.type': FILE, Id: 'a/1', Name: 'big.txt', ContentType: 'text/plain', Size: 1, ContentBytes: b64(big) });
+    const out = parseToolResult<Out>(await call(s.client));
+    expect(out.text).toBe('x'.repeat(200 * 1024 - 1));
+    expect(out.text).not.toContain('\uFFFD');
+    expect(out.textTruncated).toBe(true);
+  });
+
+  it('refuses to inline content over 5 MB even when the metadata size understates it', async () => {
+    const huge = b64(Buffer.alloc(5 * 1024 * 1024 + 3, 0x61));
+    const s = stub({ '@odata.type': FILE, Id: 'a/1', Name: 'huge.txt', ContentType: 'text/plain', Size: 10, ContentBytes: huge });
+    const from = vi.spyOn(Buffer, 'from');
+    try {
+      const out = parseToolResult<Out>(await call(s.client));
+      expect(out.inlined).toBe(false);
+      expect(out.hint).toMatch(/5 MB/);
+      expect(out).not.toHaveProperty('text');
+      // Judged from the base64 length, before decoding it.
+      expect(from.mock.calls.some((c) => (c as unknown[])[0] === huge && (c as unknown[])[1] === 'base64')).toBe(false);
+    } finally {
+      from.mockRestore();
+    }
+  });
+
+  it('returns an SVG as decoded text, not image content', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg>';
+    const s = stub({ '@odata.type': FILE, Id: 'a/1', Name: 'logo.svg', ContentType: 'image/svg+xml', Size: svg.length, ContentBytes: b64(svg) });
+    const res = await call(s.client);
+    expect((res.content as { type: string }[]).some((c) => c.type === 'image')).toBe(false);
+    const out = parseToolResult<Out>(res);
+    expect(out).toMatchObject({ inlined: true, text: svg, untrusted_content: true });
+  });
+
   it('returns other binary types as metadata only, never fetching the bytes', async () => {
     const s = stub({ '@odata.type': FILE, Id: 'a/1', Name: 'report.pdf', ContentType: 'application/pdf', Size: 1234, ContentBytes: b64('pdf') });
     const out = parseToolResult<Out>(await call(s.client));

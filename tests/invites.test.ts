@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
-import { buildQueryString, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
+import { ApiError, buildQueryString, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerWriteTools } from '../src/tools/writes.js';
 import type { OutlookClient } from '../src/client.js';
@@ -43,11 +43,19 @@ const RESPONSE_OF: Record<string, string> = {
  */
 function stub(
   event: Ev | undefined,
-  opts: { persist?: boolean; goneAfterDecline?: boolean; writeError?: Error; noEventOnMessage?: boolean } = {},
+  opts: {
+    persist?: boolean;
+    goneAfterDecline?: boolean;
+    writeError?: Error;
+    noEventOnMessage?: boolean;
+    /** The read-back after the response POST throws this. */
+    readBackError?: Error;
+  } = {},
 ) {
   const calls: { method: string; path: string; body?: unknown }[] = [];
   let stored = event ? { ...event } : undefined;
   let declined = false;
+  let responded = false;
   const get = vi.fn(async (p: string, o?: { query?: Record<string, unknown> }) => {
     const path = wire(p, o);
     calls.push({ method: 'GET', path });
@@ -55,7 +63,8 @@ function stub(
       return opts.noEventOnMessage ? { Id: 'm-1' } : { Id: 'm-1', Event: stored };
     }
     if (p.startsWith('/me/events/')) {
-      if (declined && opts.goneAfterDecline) throw new Error('404 Not Found');
+      if (declined && opts.goneAfterDecline) throw new ApiError(404, 'Outlook 404: ErrorItemNotFound');
+      if (responded && opts.readBackError) throw opts.readBackError;
       return stored;
     }
     return {};
@@ -64,6 +73,7 @@ function stub(
     calls.push({ method, path, body });
     if (opts.writeError) throw opts.writeError;
     const verb = path.split('/').pop() ?? '';
+    responded = true;
     if (verb === 'decline') declined = true;
     if (opts.persist !== false && stored) stored = { ...stored, ResponseStatus: { Response: RESPONSE_OF[verb] } };
     return undefined;
@@ -206,6 +216,30 @@ describe('outlook_respond_to_invite', () => {
     const body = parseToolResult<Ev>(res);
     expect(body).toMatchObject({ responded: true, response: 'Declined' });
     expect(String(body.note)).toMatch(/no longer on (your|the) calendar/i);
+    await h.close();
+  });
+
+  it('does not read a failed read-back after a decline as "gone" unless it was a 404', async () => {
+    const { client } = stub(invite(), { readBackError: new ApiError(503, 'Outlook 503: busy') });
+    const h = await harness(client);
+    const res = await confirmed(h, { eventId: 'ev-1', response: 'decline' });
+    expect(res.isError).toBeFalsy();
+    const body = parseToolResult<Ev>(res);
+    expect(body.responded).toBeNull();
+    expect(body).not.toHaveProperty('note');
+    expect(String(body.warning)).toMatch(/unverified/);
+    expect(String(body.warning)).toMatch(/503/);
+    await h.close();
+  });
+
+  it.each(['accept', 'tentative'])('reports a failed read-back after %s as unverified', async (response) => {
+    const { client } = stub(invite(), { readBackError: new ApiError(404, 'Outlook 404: ErrorItemNotFound') });
+    const h = await harness(client);
+    const res = await confirmed(h, { eventId: 'ev-1', response });
+    expect(res.isError).toBeFalsy();
+    const body = parseToolResult<Ev>(res);
+    expect(body).toMatchObject({ responded: null, eventId: 'ev-1', sentResponse: true });
+    expect(String(body.warning)).toMatch(/unverified/);
     await h.close();
   });
 
