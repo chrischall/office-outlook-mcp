@@ -140,7 +140,7 @@ describe('outlook_respond_to_invite', () => {
     const lookup = decodeURIComponent(calls[0].path);
     expect(lookup).toMatch(/^\/me\/messages\/m-1\?/);
     expect(lookup).toContain('$expand=Microsoft.OutlookServices.EventMessage/Event');
-    expect(writes()[0]).toMatchObject({ path: '/me/events/ev-1/accept', body: { Comment: '', SendResponse: true } });
+    expect(writes()[0]).toEqual({ method: 'POST', path: '/me/events/ev-1/accept', body: { SendResponse: true } });
     await h.close();
   });
 
@@ -231,9 +231,37 @@ describe('outlook_respond_to_invite', () => {
       await h.callTool('outlook_respond_to_invite', { eventId: 'ev-1', response: 'tentative', sendResponse: false }),
     );
     expect(writes()).toEqual([
-      { method: 'POST', path: '/me/events/ev-1/tentativelyaccept', body: { Comment: '', SendResponse: false } },
+      // No Comment key at all: Outlook rejects SendResponse:false with any
+      // Comment, even an empty one ("'SendResponse' must be true when
+      // 'Comment' is not null" — live, 2026-10-10).
+      { method: 'POST', path: '/me/events/ev-1/tentativelyaccept', body: { SendResponse: false } },
     ]);
     expect(res).toMatchObject({ responded: true, response: 'TentativelyAccepted', sentResponse: false });
+    await h.close();
+  });
+
+  it('refuses a comment when no response is sent, before writing anything', async () => {
+    const { client, writes } = stub(invite());
+    const h = await harness(client);
+    const res = await h.callTool('outlook_respond_to_invite', {
+      eventId: 'ev-1',
+      response: 'accept',
+      sendResponse: false,
+      comment: 'see you there',
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/comment/i);
+    expect(writes()).toHaveLength(0);
+    await h.close();
+  });
+
+  it('omits Comment from a notified response that has none', async () => {
+    const { client, writes } = stub(invite());
+    const h = await harness(client);
+    await confirmed(h, { eventId: 'ev-1', response: 'accept' });
+    expect(writes()).toEqual([
+      { method: 'POST', path: '/me/events/ev-1/accept', body: { SendResponse: true } },
+    ]);
     await h.close();
   });
 

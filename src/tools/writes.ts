@@ -864,8 +864,16 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
 
       const { verb, status } = INVITE_RESPONSES[response];
       const notify = sendResponse !== false;
+      // Outlook rejects SendResponse:false alongside ANY Comment, even an empty
+      // one ("'SendResponse' must be true when 'Comment' is not null" — live,
+      // 2026-10-10), so the key is only sent when there is text to send.
+      if (!notify && comment) {
+        throw new McpToolError('A comment can only go with a response the organizer receives.', {
+          hint: 'Drop the comment, or leave sendResponse at its default (true) so the organizer gets both.',
+        });
+      }
       const path = `/me/events/${encodeURIComponent(id)}/${verb}`;
-      const payload = { Comment: comment ?? '', SendResponse: notify };
+      const payload = { ...(comment ? { Comment: comment } : {}), SendResponse: notify };
 
       // Only a response the organizer receives reaches another person; without
       // one this is a change to your own calendar and needs no confirmation.
