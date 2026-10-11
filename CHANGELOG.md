@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.5.1...v0.5.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 2 updates ([#68](https://github.com/chrischall/office-outlook-mcp/issues/68)) ([536115b](https://github.com/chrischall/office-outlook-mcp/commit/536115b6e5741a606aee7a2d4d7f6324cd60046a))
+
 ## [0.5.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.5.0...v0.5.1) (2026-10-10)
 
 
