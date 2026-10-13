@@ -4,3 +4,6 @@ coverage/
 .env
 *.mcpb
 *.skill
+# local Codex config + skill mirrors (generated, not shared)
+.agents/
+.codex/
