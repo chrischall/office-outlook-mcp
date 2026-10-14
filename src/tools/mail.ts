@@ -22,7 +22,16 @@ import {
   VIEWS,
 } from '../view.js';
 import { EVENT_EXPAND, INVITE_GONE, MEETING_MESSAGE_TYPE, resolvedEvent, type InviteEvent } from './_invite.js';
-import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
+import {
+  decodeFrom,
+  fetchPage,
+  fromPage,
+  fromParam,
+  fromQuery,
+  nextLinkParam,
+  plainCollection,
+  type FromPosition,
+} from './_paging.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
 /**
@@ -200,6 +209,54 @@ function sinceLiteral(hours: number): string {
   return new Date(Date.now() - hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+/** Read `from` once the arguments it cannot be combined with are ruled out. */
+function fromPosition(from: string | undefined, conflicts: Record<string, unknown>): FromPosition | undefined {
+  if (from === undefined) return undefined;
+  for (const [name, value] of Object.entries(conflicts)) {
+    if (value === undefined) continue;
+    throw new McpToolError(`\`from\` and \`${name}\` cannot be combined.`, {
+      hint:
+        name === 'nextLink'
+          ? 'To continue a `from` listing, pass its `next_from` as `from`; `nextLink` belongs to the newest-first listing.'
+          : `\`from\` pages oldest first by time; drop \`${name}\`, or omit \`from\` for the newest-first listing.`,
+    });
+  }
+  return decodeFrom(from);
+}
+
+/** How `from` reads, shared by both mail listings. */
+const FROM_DESCRIPTION =
+  'Pass `from` (an ISO 8601 UTC time, or a previous `next_from`) to page OLDEST first from that time instead: the result carries `next_from` (pass it back unchanged as `from` for the next page; on an empty page it is the same position, so it can be polled for new arrivals) and `has_more` (more already waiting), and no nextLink. Backfill: pass an old `from` and keep passing `next_from` until `has_more` is false; then keep polling with the last `next_from` for new mail.';
+
+/** `outlook_list_messages` with `from`: one oldest-first keyset page. */
+async function listFrom(
+  client: OutlookClient,
+  pos: FromPosition,
+  opts: { view: string; folder: string | undefined; limit: number; unreadOnly: boolean | undefined },
+): Promise<ReturnType<typeof mailboxUntrusted>> {
+  const { bound, top } = fromQuery(pos, opts.limit);
+  const data = await client.get<{ value?: OutlookMessage[]; '@odata.nextLink'?: string }>(
+    `/me/mailfolders/${folderSegment(opts.folder ?? 'inbox')}/messages`,
+    {
+      query: {
+        $top: top,
+        $select: LIST_SELECT,
+        // The date bound leads: Outlook rejects a $filter that does not start with the $orderby property.
+        $filter: opts.unreadOnly === true ? `${bound} and IsRead eq false` : bound,
+        $orderby: 'ReceivedDateTime asc',
+      },
+    },
+  );
+  const listed = Array.isArray(data?.value) ? data.value : [];
+  const page = fromPage(listed, pos, opts.limit, Boolean(data?.['@odata.nextLink']));
+  const { '@odata.nextLink': _superseded, ...rest } = data ?? {};
+  const body =
+    opts.view === 'raw'
+      ? { ...rest, value: page.rows }
+      : projectCollection({ value: page.rows }, opts.view === 'full' ? fullMessage : compactMessage, 'message');
+  return mailboxUntrusted({ ...body, next_from: page.next_from, has_more: page.has_more });
+}
+
 export function registerMailTools(server: McpServer, client: OutlookClient): void {
   server.registerTool(
     'outlook_list_folders',
@@ -238,7 +295,9 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_list_messages',
     {
       description:
-        "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless. Each message's To list (and Cc, in the full view) holds at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — pass view:\"raw\" for every address." +
+        "List messages in a folder, newest first. Defaults to the inbox. Use `unreadOnly` for a triage view. Bodies are NOT included — call outlook_get_message for one. Note `search` and `unreadOnly` cannot be combined on a first-page request (the API rejects $search with $filter); pass `search` alone to search the whole mailbox. When following a `nextLink`, both are ignored, so echoing them back is harmless. Each message's To list (and Cc, in the full view) holds at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — pass view:\"raw\" for every address. " +
+        FROM_DESCRIPTION +
+        ' Cannot combine with `search`, `skip` or `nextLink`.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
@@ -254,10 +313,15 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           .string()
           .optional()
           .describe('Full-text search across the whole mailbox; cannot combine with unreadOnly on a first page (ignored with nextLink)'),
+        from: fromParam,
         nextLink: nextLinkParam,
       }),
     },
-    async ({ view, folder, limit, skip, unreadOnly, search, nextLink }) => {
+    async ({ view, folder, limit, skip, unreadOnly, search, from, nextLink }) => {
+      const pos = fromPosition(from, { nextLink, search, skip });
+      if (pos !== undefined) {
+        return listFrom(client, pos, { view: resolveView(view, VIEWS), folder, limit: limit ?? 25, unreadOnly });
+      }
       // With nextLink the filters come from the link and are ignored here, so
       // the conflict only matters for a first-page request.
       if (nextLink === undefined && search !== undefined && unreadOnly === true) {
@@ -323,7 +387,9 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_get_unread',
     {
       description:
-        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id (when the meeting is no longer on your calendar — already declined, cancelled or deleted — the item has a `hint` instead and there is nothing to respond to). `to`/`cc` list at most 20 addresses; a longer list adds `toCount`/`ccCount` and `toTruncated`/`ccTruncated`. This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the plain mail you handled, so the next call returns only what is still new. An invite you answer with outlook_respond_to_invite needs no mark-read: Outlook moves it to Deleted Items under a new id, so its old id would 404. Follow `nextLink` for more.' +
+        'Triage batch: the unread messages in a folder (default inbox), newest first, each WITH its plain-text body (truncated to `maxBodyChars`) in one call — no follow-up outlook_get_message needed. Every item has a `kind`: "mail", "meetingRequest", "meetingCancelled" or "meetingResponse" (a reply to an invite you sent). Requests and cancellations also carry `event` (id, time, organizer, your current `responseStatus`) so the invite can be answered by its event id (when the meeting is no longer on your calendar — already declined, cancelled or deleted — the item has a `hint` instead and there is nothing to respond to). `to`/`cc` list at most 20 addresses; a longer list adds `toCount`/`ccCount` and `toTruncated`/`ccTruncated`. This does NOT mark anything read. Processing loop: read the batch → act on each item (reply, respond to the invite, file, flag — or leave it) → call outlook_mark_read on the plain mail you handled, so the next call returns only what is still new. An invite you answer with outlook_respond_to_invite needs no mark-read: Outlook moves it to Deleted Items under a new id, so its old id would 404. Follow `nextLink` for more. ' +
+        FROM_DESCRIPTION +
+        ' Cannot combine with `sinceHours` or `nextLink`.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       inputSchema: z.object({
@@ -334,7 +400,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           .positive()
           .max(24 * 365)
           .optional()
-          .describe('Only mail received in the last N hours'),
+          .describe('Only mail received in the last N hours (not with `from`)'),
         includeBody: z
           .boolean()
           .optional()
@@ -346,13 +412,18 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           .max(100_000)
           .optional()
           .describe('Truncate each body to this many characters (default 4000); `bodyTruncated` marks a cut'),
+        from: fromParam,
         nextLink: nextLinkParam,
       }),
     },
-    async ({ folder, limit, sinceHours, includeBody, maxBodyChars, nextLink }) => {
+    async ({ folder, limit, sinceHours, includeBody, maxBodyChars, from, nextLink }) => {
+      const pos = fromPosition(from, { nextLink, sinceHours });
+      const max = limit ?? 25;
+      const keyset = pos !== undefined ? fromQuery(pos, max) : undefined;
       // Outlook rejects a $filter that does not lead with the $orderby
       // property ("InefficientFilter"), so the date bound goes first.
       const filter = [
+        keyset?.bound,
         sinceHours !== undefined ? `ReceivedDateTime ge ${sinceLiteral(sinceHours)}` : undefined,
         'IsRead eq false',
       ]
@@ -364,14 +435,16 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         `/me/mailfolders/${folderSegment(folder ?? 'inbox')}/messages`,
         {
           query: {
-            $top: limit ?? 25,
+            $top: keyset?.top ?? max,
             $select: UNREAD_SELECT,
             $filter: filter,
-            $orderby: 'ReceivedDateTime desc',
+            $orderby: keyset ? 'ReceivedDateTime asc' : 'ReceivedDateTime desc',
           },
         },
       );
-      const rows = Array.isArray(data?.value) ? data.value : [];
+      const listed = Array.isArray(data?.value) ? data.value : [];
+      const page = pos !== undefined ? fromPage(listed, pos, max, Boolean(data?.['@odata.nextLink'])) : undefined;
+      const rows = page?.rows ?? listed;
       const wantBody = includeBody !== false;
       const cap = maxBodyChars ?? 4000;
 
@@ -423,8 +496,14 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       });
 
       const out: Record<string, unknown> = { count: items.length, items };
-      const next = data?.['@odata.nextLink'];
-      if (next) out.nextLink = next;
+      if (page !== undefined) {
+        // The token supersedes the API link, which would resume newest-first.
+        out.next_from = page.next_from;
+        out.has_more = page.has_more;
+      } else {
+        const next = data?.['@odata.nextLink'];
+        if (next) out.nextLink = next;
+      }
       return mailboxUntrusted(out);
     },
   );
