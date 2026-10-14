@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.5.2...v0.6.0) (2026-10-14)
+
+
+### Features
+
+* **mail:** page mail oldest first from a UTC time with a resumable next_from ([#72](https://github.com/chrischall/office-outlook-mcp/issues/72)) ([d0d63da](https://github.com/chrischall/office-outlook-mcp/commit/d0d63daca949c973c976e6a029e979e9de82a4a6))
+
 ## [0.5.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.5.1...v0.5.2) (2026-10-11)
 
 
