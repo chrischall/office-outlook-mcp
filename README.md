@@ -202,6 +202,18 @@ each asks you to confirm first — except a reply saved with `draftOnly: true`
 (it stays in Drafts until you send it) and an invite response with
 `sendResponse: false` (only your calendar changes; the organizer is not told).
 
+## Paging from a time
+
+`outlook_get_unread` and `outlook_list_messages` also page **oldest first**
+from a point in time: pass `from` as an ISO 8601 UTC time
+(`2026-10-01T00:00:00Z`). The result carries `next_from` — pass it back
+unchanged as `from` for the next page — and `has_more`. To backfill, start
+from an old time and keep passing `next_from` until `has_more` is false; then
+keep polling with the last `next_from` to pick up new mail (an empty page
+returns the same position). Messages that share a timestamp are never skipped
+or repeated across pages, and marking mail read between pages loses nothing.
+`from` cannot be combined with `nextLink`, `sinceHours`, `search` or `skip`.
+
 ## Confirmations
 
 Every write asks you to confirm before anything is sent or changed (except a
