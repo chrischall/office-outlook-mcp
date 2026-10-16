@@ -260,7 +260,6 @@ describe('read tools', () => {
 describe('write tools are confirmation-gated', () => {
   const writeTools = [
     ['outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }],
-    ['outlook_create_draft', { to: ['a@example.com'], subject: 's', body: 'b' }],
     ['outlook_mark_read', { id: 'm1', isRead: true }],
     ['outlook_move_message', { id: 'm1', destination: 'archive' }],
     ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00' }],
@@ -355,6 +354,21 @@ describe('write tools are confirmation-gated', () => {
     expect(res.status).toBe('unknown');
     expect(res.warning).toMatch(where);
     expect(res.warning).toMatch(/before retrying/);
+    expect(write).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('outlook_create_draft (ungated) reports a timed-out create as unknown, pointing at Drafts', async () => {
+    const write = vi.fn(async () => {
+      throw new WriteOutcomeUnknownError('Outlook', 'POST', { timeoutMs: 60_000 });
+    });
+    const { client } = stubClient({ write });
+    const h = await harnessFor(registerWriteTools, client);
+    const raw = await h.callTool('outlook_create_draft', { to: ['a@example.com'], subject: 's', body: 'b' });
+    expect(raw.isError).toBeFalsy();
+    const res = parseToolResult<{ status?: string; warning?: string }>(raw);
+    expect(res.status).toBe('unknown');
+    expect(res.warning).toMatch(/Drafts/);
     expect(write).toHaveBeenCalledTimes(1);
     await h.close();
   });

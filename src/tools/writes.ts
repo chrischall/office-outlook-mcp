@@ -55,6 +55,17 @@ const teamsMeetingParam = z
   .optional()
   .describe('Attach a Microsoft Teams meeting (default true). false leaves it off.');
 
+/**
+ * On update the Teams meeting is opt-in: an edit to an in-person meeting (or one
+ * on another provider) must not change how people join it unless asked.
+ */
+const addTeamsMeetingParam = z
+  .boolean()
+  .optional()
+  .describe(
+    'true adds a Microsoft Teams meeting to an event that lacks one (default false: the way people join is left as it is).',
+  );
+
 interface Attendee {
   Type?: string;
   EmailAddress?: { Address?: string; Name?: string };
@@ -338,41 +349,35 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_draft',
     {
       description:
-        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be reviewed and sent from Outlook.' +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be reviewed and sent from Outlook. ' +
+        'It does not ask to confirm: a draft reaches nobody until it is sent from Outlook. Calling it twice leaves two drafts. ' +
+        TIMEOUT_SENTENCE,
+      // Self-only and additive, like outlook_reply with draftOnly: nothing is
+      // overwritten or sent. Not idempotent: a repeat creates a second draft.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         to: recipientList,
         cc: recipientList,
         subject: z.string().describe('Subject line'),
         body: z.string().describe('Message body'),
         html: z.boolean().optional().describe('Compose the body as HTML (default: plain text)'),
-        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ to, cc, subject, body, html, confirmToken }, ctx) => {
+    async ({ to, cc, subject, body, html }) => {
       const payload = {
         ...messageBody(subject, body, html),
         ToRecipients: toRecipients(to),
         ...(cc?.length ? { CcRecipients: toRecipients(cc) } : {}),
       };
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_create_draft',
-        action: 'mail.create_draft',
-        message: 'Review and confirm this draft:',
-        summary: `Create draft "${subject}"`,
-        // One signed-in mailbox per server process.
-        account: undefined,
-        request: { method: 'POST', path: '/me/messages', body: payload },
-        confirmToken,
-      });
-      if (gate) return gate;
-      const created = await client.write<{ Id?: string; WebLink?: string }>(
-        'POST',
-        '/me/messages',
-        payload,
+      // Nothing leaves the mailbox, so there is no one to protect with a
+      // confirmation (same rule as outlook_reply draftOnly). A lost answer
+      // says to look in Drafts before retrying, so a retry does not duplicate.
+      const create = await writeOrUnknown(
+        () => client.write<{ Id?: string; WebLink?: string }>('POST', '/me/messages', payload),
+        'Drafts',
       );
+      if (!create.ok) return create.result;
+      const created = create.value;
       return minifiedResult({ created: true, Id: created?.Id, WebLink: created?.WebLink });
     },
   );
@@ -644,7 +649,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_update_event',
     {
       description:
-        'Update a meeting you organize: retitle, move, relocate, edit the description, or add/remove attendees. Moving only `start` keeps the meeting\'s length. A Microsoft Teams meeting is added if the event lacks one (`teamsMeeting: false` to skip). Attendees are sent an updated invitation. Only the organizer can update a meeting — an attendee\'s edit would change their own copy alone, so it is refused. The result is verified by re-reading the event.' +
+        'Update a meeting you organize: retitle, move, relocate, edit the description, or add/remove attendees. Moving only `start` keeps the meeting\'s length. It does not add a Microsoft Teams meeting unless you pass `teamsMeeting: true` (on an event that lacks one). Attendees are sent an updated invitation. Only the organizer can update a meeting — an attendee\'s edit would change their own copy alone, so it is refused. The result is verified by re-reading the event.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' ' +
@@ -667,7 +672,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         addAttendees: recipientList.describe('Required attendees to add'),
         addOptionalAttendees: recipientList.describe('Optional attendees to add'),
         removeAttendees: recipientList.describe('Attendees to remove'),
-        teamsMeeting: teamsMeetingParam,
+        teamsMeeting: addTeamsMeetingParam,
         confirmToken: confirmTokenParam,
       }),
     },
@@ -744,20 +749,27 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         payload.Attendees = next;
       }
 
-      const addTeams = args.teamsMeeting !== false && !(current && isTeams(current));
+      const addTeams = args.teamsMeeting === true && !(current && isTeams(current));
       if (addTeams) Object.assign(payload, TEAMS);
 
       if (Object.keys(payload).length === 0) {
         throw new McpToolError('Nothing to update.', {
-          hint: 'Pass at least one of subject, start, end, location, body, or attendee changes.',
+          hint: 'Pass at least one of subject, start, end, location, body, attendee changes, or teamsMeeting: true.',
         });
       }
 
       const gate = await confirmWrite(ctx, {
         tool: 'outlook_update_event',
         action: 'calendar.update_event',
-        message: 'Review and confirm this change (attendees are sent an updated invitation):',
-        summary: `Update "${current?.Subject ?? args.id}": ${Object.keys(payload).join(', ')}`,
+        message: addTeams
+          ? 'Review and confirm this change (attendees are sent an updated invitation). This will also make it a Microsoft Teams meeting: attendees get a Teams join link.'
+          : 'Review and confirm this change (attendees are sent an updated invitation):',
+        summary: `Update "${current?.Subject ?? args.id}": ${[
+          Object.keys(payload).filter((k) => !(k in TEAMS)).join(', '),
+          addTeams ? 'this will also make it a Microsoft Teams meeting' : '',
+        ]
+          .filter((part) => part !== '')
+          .join('; ')}`,
         // One signed-in mailbox per server process.
         account: undefined,
         target: args.id,

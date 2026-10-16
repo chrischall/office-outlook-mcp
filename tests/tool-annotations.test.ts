@@ -79,8 +79,9 @@ describe('tool annotations', () => {
     expect(destructive('outlook_reply')).toBe(true);
     // Nothing restores a deleted event, and attendees are sent a cancellation.
     expect(destructive('outlook_delete_event')).toBe(true);
-    // No tool in this set deletes a draft, so nothing restores the prior state.
-    expect(destructive('outlook_create_draft')).toBe(true);
+    // A draft reaches nobody and only adds to Drafts (as outlook_reply draftOnly does).
+    expect(destructive('outlook_create_draft')).toBe(false);
+    expect(ann['outlook_create_draft']?.idempotentHint).not.toBe(true);
     // Self-inverse: mark_read(isRead: !x) and move_message back to the old folder.
     expect(destructive('outlook_mark_read')).toBe(false);
     expect(destructive('outlook_move_message')).toBe(false);

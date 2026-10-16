@@ -119,8 +119,9 @@ Everything is optional — with nothing set, the server captures from the browse
 `outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
 `outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
 `outlook_reply`.
-Three skip the confirmation when nothing reaches anyone else:
-`outlook_reply` with `draftOnly: true` (the reply stays in Drafts),
+Some skip the confirmation because nothing reaches anyone else:
+`outlook_create_draft` (the draft stays in Drafts until you send it from
+Outlook), `outlook_reply` with `draftOnly: true` (the reply stays in Drafts),
 `outlook_respond_to_invite` with `sendResponse: false`, and
 `outlook_delete_event` on your own appointment with no attendees or on a
 meeting the organizer already cancelled (in each, only your calendar
@@ -129,9 +130,12 @@ changes).
 **Meetings** — `outlook_find_meeting_times` asks Outlook's Scheduling
 Assistant for slots when everyone is free, and `outlook_get_schedule` shows
 each person's busy blocks. Each suggested slot carries `createEventArgs`,
-which `outlook_create_event` accepts unchanged. `outlook_create_event` and
-`outlook_update_event` attach a Microsoft Teams meeting by default and return
-its join link; pass `teamsMeeting: false` to leave it off. Only the organizer
+which `outlook_create_event` accepts unchanged. `outlook_create_event`
+attaches a Microsoft Teams meeting by default and returns its join link; pass
+`teamsMeeting: false` to leave it off. `outlook_update_event` never changes how
+people join a meeting unless asked: pass `teamsMeeting: true` to add a Teams
+meeting to an event that lacks one, and the confirmation says so in plain
+words. Only the organizer
 can update a meeting. `outlook_respond_to_invite` accepts, tentatively accepts
 or declines an invite, by its message id or its event id.
 `outlook_delete_event` deletes an event you organize — one occurrence by the
@@ -217,7 +221,8 @@ or repeated across pages, and marking mail read between pages loses nothing.
 ## Confirmations
 
 Every write asks you to confirm before anything is sent or changed (except a
-draft-only reply and a silent invite response — see [Tools](#tools)). A client
+new draft, a draft-only reply and a silent invite response — see
+[Tools](#tools)). A client
 that can show a confirmation prompt (Claude Code) shows one. On a client that
 cannot, the first call does nothing and returns a `confirmation-required`
 preview plus a `confirmToken`; only a repeat call with that token performs the

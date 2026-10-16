@@ -378,16 +378,17 @@ async function confirmedCall(h: TestHarness, name: string, args: Record<string, 
 }
 
 describe('confirmed write paths', () => {
-  it('creates a draft and reports the new id', async () => {
+  it('creates a draft without asking to confirm (it reaches nobody) and reports the new id', async () => {
     const client = stub();
     (client.write as ReturnType<typeof vi.fn>).mockResolvedValue({ Id: 'd1', WebLink: 'w' });
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const out = parseToolResult<{ created: boolean; Id: string }>(
-      await confirmedCall(h, 'outlook_create_draft', {
+      await h.callTool('outlook_create_draft', {
         to: ['a@example.com'], cc: ['c@example.com'], subject: 's', body: 'b', html: true,
       }),
     );
+    expect((client.write as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
     expect(out).toMatchObject({ created: true, Id: 'd1' });
     const [, path, body] = (client.write as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(path).toBe('/me/messages');
