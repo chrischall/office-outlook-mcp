@@ -74,7 +74,6 @@ const gated = [
     'POST',
     '/me/sendmail',
   ],
-  ['outlook_create_draft', { to: ['a@example.com'], subject: 's', body: 'b' }, 'POST', '/me/messages'],
   ['outlook_mark_read', { id: 'm1', isRead: true }, 'PATCH', '/me/messages/m1'],
   ['outlook_move_message', { id: 'm1', destination: 'archive' }, 'POST', '/me/messages/m1/move'],
   [
@@ -138,7 +137,10 @@ describe('every write tool is gated by a confirm token', () => {
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const { tools } = await h.client.listTools();
     expect(tools).toHaveLength(10);
-    for (const tool of tools) {
+    // outlook_create_draft is the one ungated write: a draft reaches nobody.
+    const draft = tools.find((t) => t.name === 'outlook_create_draft');
+    expect(draft?.inputSchema.properties ?? {}).not.toHaveProperty('confirmToken');
+    for (const tool of tools.filter((t) => t.name !== 'outlook_create_draft')) {
       const props = tool.inputSchema.properties ?? {};
       expect(props).toHaveProperty('confirmToken');
       expect(props).not.toHaveProperty('confirm');

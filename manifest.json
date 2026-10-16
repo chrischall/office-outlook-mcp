@@ -206,7 +206,7 @@
     },
     {
       "name": "outlook_create_draft",
-      "description": "Create a draft without sending (asks you to confirm first)"
+      "description": "Create a draft in Drafts without sending it (no confirmation: it reaches nobody)"
     },
     {
       "name": "outlook_mark_read",

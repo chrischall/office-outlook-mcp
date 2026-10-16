@@ -198,10 +198,25 @@ describe('outlook_update_event', () => {
     await h.close();
   });
 
-  it('adds a Teams meeting to an event that lacks one', async () => {
+  it('leaves an in-person meeting alone on a retitle: no Teams meeting unless asked', async () => {
     const { client, calls } = stub(baseEvent());
     const h = await harness(client);
+    const first = await h.callTool('outlook_update_event', { id: 'e1', subject: 'Renamed' });
+    expect(JSON.stringify(first.content)).not.toMatch(/Teams meeting/);
     const res = parseToolResult<Ev>(await confirmed(h, 'outlook_update_event', { id: 'e1', subject: 'Renamed' }));
+    expect(writes(calls)[0].body).toEqual({ Subject: 'Renamed' });
+    expect(res).toMatchObject({ updated: true });
+    expect(res).not.toHaveProperty('warning');
+    await h.close();
+  });
+
+  it('adds a Teams meeting to an event that lacks one when teamsMeeting is true, and says so in the preview', async () => {
+    const { client, calls } = stub(baseEvent());
+    const h = await harness(client);
+    const args = { id: 'e1', subject: 'Renamed', teamsMeeting: true };
+    const first = await h.callTool('outlook_update_event', args);
+    expect(JSON.stringify(first.content)).toMatch(/will also make it a Microsoft Teams meeting/);
+    const res = parseToolResult<Ev>(await confirmed(h, 'outlook_update_event', args));
     expect(writes(calls)[0].body).toMatchObject({
       Subject: 'Renamed',
       IsOnlineMeeting: true,
@@ -214,8 +229,17 @@ describe('outlook_update_event', () => {
   it('adds only the Teams meeting when that is the one change', async () => {
     const { client, calls } = stub(baseEvent());
     const h = await harness(client);
-    await confirmed(h, 'outlook_update_event', { id: 'e1' });
+    await confirmed(h, 'outlook_update_event', { id: 'e1', teamsMeeting: true });
     expect(writes(calls)[0].body).toEqual({ IsOnlineMeeting: true, OnlineMeetingProvider: 'TeamsForBusiness' });
+    await h.close();
+  });
+
+  it('refuses an update with no arguments rather than convert the meeting to Teams', async () => {
+    const { client, calls } = stub(baseEvent());
+    const h = await harness(client);
+    const res = await h.callTool('outlook_update_event', { id: 'e1' });
+    expect(res.isError).toBe(true);
+    expect(writes(calls)).toHaveLength(0);
     await h.close();
   });
 
@@ -272,7 +296,9 @@ describe('outlook_update_event', () => {
   it('verifies by re-reading and warns when a change did not stick', async () => {
     const { client } = stub(baseEvent(), { persist: false });
     const h = await harness(client);
-    const res = parseToolResult<Ev>(await confirmed(h, 'outlook_update_event', { id: 'e1', subject: 'Renamed' }));
+    const res = parseToolResult<Ev>(
+      await confirmed(h, 'outlook_update_event', { id: 'e1', subject: 'Renamed', teamsMeeting: true }),
+    );
     expect(res.updated).toBe(false);
     expect(String(res.warning)).toMatch(/Subject/);
     expect(String(res.warning)).toMatch(/Teams/);
