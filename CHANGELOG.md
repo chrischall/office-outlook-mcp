@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.6.0...v0.6.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **calendar:** stop outlook_update_event turning meetings into Teams meetings by default ([#74](https://github.com/chrischall/office-outlook-mcp/issues/74)) ([00229e7](https://github.com/chrischall/office-outlook-mcp/commit/00229e71c0d682de9f5796e3e089f02bc7278f50))
+* **plugin:** launch the published package so marketplace installs start ([#77](https://github.com/chrischall/office-outlook-mcp/issues/77)) ([9d86d8c](https://github.com/chrischall/office-outlook-mcp/commit/9d86d8cb2240d8fc7942ac3abe364d00e05f270c))
+
 ## [0.6.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.5.2...v0.6.0) (2026-10-14)
 
 
