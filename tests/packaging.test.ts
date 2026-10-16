@@ -124,10 +124,11 @@ describe('publish scaffold', () => {
     const cfg = read(pluginMcp);
     const names = Object.keys(cfg.mcpServers);
     expect(names.length).toBeGreaterThan(0);
+    // A git-source plugin install never builds the repo, so dist/ is absent
+    // (fleet-audit#1195): the plugin launches the published package instead.
     for (const name of names) {
-      const args = cfg.mcpServers[name].args.join(' ');
-      expect(args).toContain('${CLAUDE_PLUGIN_ROOT}');
-      expect(args).toContain('dist/bundle.js');
+      expect(cfg.mcpServers[name].command).toBe('npx');
+      expect(cfg.mcpServers[name].args).toEqual(['-y', pkg.name]);
     }
   });
 
