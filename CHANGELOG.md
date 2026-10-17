@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.6.1...v0.6.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **client:** name the host and cause when Outlook cannot be reached ([#79](https://github.com/chrischall/office-outlook-mcp/issues/79)) ([2c58250](https://github.com/chrischall/office-outlook-mcp/commit/2c582505879f31cc479b16845e2196006e17c0f1))
+
 ## [0.6.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.6.0...v0.6.1) (2026-10-16)
 
 
