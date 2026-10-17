@@ -24,13 +24,20 @@
  * cannot drive. Capture is the only path, which is why a failed capture is a
  * hard error with actionable guidance rather than a fallback.
  */
-import {
-  createBootstrapOpts,
-  createFetchproxyTransport,
-  type Capability,
-} from '@chrischall/mcp-utils/fetchproxy';
+import { captureBearerHeader } from '@chrischall/mcp-utils/fetchproxy';
 import { readPortEnv, readTtlMsEnv } from '@chrischall/mcp-utils';
 import { PACKAGE_NAME, VERSION } from './version.js';
+
+/**
+ * `raceCaptures` settles the per-host attempts under ONE overall deadline:
+ * `Promise.any` alone is not enough, because the bridge serializes the two
+ * hosts behind its single connection, so the wait was the sum rather than the
+ * max — measured live at 14.4s for a 5s window and 36s for a 20s one. At the
+ * 30s default that lands past the 60s request timeout an MCP client uses by
+ * default. Re-exported (it is mcp-utils', lifted from here) for the test that
+ * pins that bound.
+ */
+export { raceCaptures, stripBearer } from '@chrischall/mcp-utils/fetchproxy';
 
 /**
  * The fetchproxy concentrator port.
@@ -99,99 +106,6 @@ export const TRUST_DOMAINS = [...CAPTURE_HOSTS];
 const CAPTURE_TIMEOUT_MS = readTtlMsEnv('OUTLOOK_CAPTURE_TIMEOUT', 30_000);
 
 /**
- * The transport-wide deadline, derived from the capture window rather than left
- * at the library default.
- *
- * `captureRequestHeader`'s own `timeoutMs` is silently capped by
- * `fetchTimeoutMs`: a window raised past the deadline fails early at the
- * deadline's number, which reads as a timeout nobody configured. Deriving it
- * means the two cannot disagree.
- */
-const BRIDGE_DEADLINE_MS = Math.max(CAPTURE_TIMEOUT_MS + 15_000, 30_000);
-
-/**
- * Shortest plausible token. Real ones are ~5 KB of JWT; this only guards
- * against an empty or echoed header, not against a wrong-audience token.
- */
-const MIN_TOKEN_LENGTH = 100;
-
-/**
- * Add `fetch` to the derived capability set.
- *
- * `createBootstrapOpts` infers capabilities from the bootstrap DECLARATIONS and
- * the field REPLACES the server's defaults rather than extending them, so a
- * declaration-only set can silently lose `fetch`.
- */
-function withFetch<T extends { capabilities?: readonly Capability[] }>(opts: T): T {
-  const derived = opts.capabilities ?? [];
-  return {
-    ...opts,
-    capabilities: derived.includes('fetch' as Capability)
-      ? derived
-      : ([...derived, 'fetch' as Capability] as readonly Capability[]),
-  };
-}
-
-/**
- * Settle a set of per-host capture attempts under ONE overall deadline.
- *
- * `Promise.any` alone is not enough. The two declared hosts are documented as
- * raced, but the bridge serializes them behind its single connection, so the
- * wait was the sum rather than the max — measured live at 14.4s for a 5s window
- * and 36s for a 20s one. At the 30s default that lands past the 60s request
- * timeout an MCP client uses by default, so the host gave up before this code
- * could report the real reason. The window is a promise about total wait, and
- * this is what keeps it.
- *
- * Exported for the test that pins that bound.
- */
-export async function raceCaptures(
-  attempts: readonly Promise<string>[],
-  windowMs: number,
-): Promise<string> {
-  // A rejection that loses the race must not surface as an unhandled rejection
-  // once the winner has already settled the caller.
-  for (const a of attempts) a.catch(() => {});
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expiry = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `timed out after ${Math.round(windowMs / 1000)}s waiting for the page to ` +
-              'make a request we could read',
-          ),
-        ),
-      windowMs,
-    );
-  });
-
-  try {
-    // `any` resolves on the first SUCCESS rather than the first settle, so the
-    // host the user is not on failing does not sink the one they are on.
-    return await Promise.race([
-      Promise.any(attempts).catch((e: unknown) => {
-        throw new Error(
-          e instanceof AggregateError
-            ? e.errors.map((x) => (x as Error).message).join('; ')
-            : (e as Error).message,
-        );
-      }),
-      expiry,
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Normalise a captured header to a bare token, dropping any `Bearer ` prefix. */
-export function stripBearer(raw: string): string {
-  const m = /^\s*Bearer\s+(.+)$/i.exec(raw);
-  return (m ? m[1] : raw).trim();
-}
-
-/**
  * Capture an Outlook access token from the user's signed-in browser tab.
  *
  * Both hosts are attempted: whichever the tab is actually on answers first, and
@@ -200,62 +114,24 @@ export function stripBearer(raw: string): string {
  * Returns the bare token (no `Bearer ` prefix).
  */
 export async function captureTokenViaFetchproxy(): Promise<string> {
-  const transport = createFetchproxyTransport({
-    ...withFetch(
-      createBootstrapOpts({
-        domains: [...TRUST_DOMAINS],
-        bootstrap: {
-          captureHeaders: [{ ...CAPTURE_DECL_CLOUD }, { ...CAPTURE_DECL_OFFICE }],
-        },
-      }),
-    ),
+  // `captureBearerHeader` declares only `capture_request_header` beside the
+  // `fetch` base verb, derives the bridge deadline from the window (window +
+  // 15 s, never under 30 s) so a raised window is not cut off early, starts the
+  // transport (skipping `start()` makes the first verb throw "ensureConnected
+  // called before listen()", which reads like a pairing problem), rejects a
+  // header too short to be a token (real ones are ~5 KB of JWT), and closes
+  // the transport whatever happened.
+  return captureBearerHeader({
+    captures: [CAPTURE_DECL_CLOUD, CAPTURE_DECL_OFFICE],
+    domains: TRUST_DOMAINS,
+    windowMs: CAPTURE_TIMEOUT_MS,
     port: getWsPort(),
-    fetchTimeoutMs: BRIDGE_DEADLINE_MS,
     serverName: PACKAGE_NAME,
     version: VERSION,
+    what: 'an Outlook token',
+    guidance:
+      'Open a signed-in Outlook tab (outlook.cloud.microsoft or ' +
+      'outlook.office.com), leave it in the foreground for a moment so the ' +
+      'page makes a request, and retry.',
   });
-
-  try {
-    // `start()` loads the identity keypair. It does not bind the port or dial —
-    // that stays lazy until the first verb — but skipping it makes the first
-    // verb throw "ensureConnected called before listen()", which reads exactly
-    // like a pairing problem and is not one.
-    await transport.start();
-
-    const attempts = [CAPTURE_DECL_CLOUD, CAPTURE_DECL_OFFICE].map((decl) =>
-      transport.server
-        .captureRequestHeader({ ...decl, timeoutMs: CAPTURE_TIMEOUT_MS })
-        .then((raw) => {
-          if (typeof raw !== 'string') {
-            throw new Error(`${decl.host}: capture returned no header`);
-          }
-          const token = stripBearer(raw);
-          if (token.length < MIN_TOKEN_LENGTH) {
-            throw new Error(
-              `${decl.host}: authorization header was present but too short to be a ` +
-                `token (${token.length} chars)`,
-            );
-          }
-          return token;
-        }),
-    );
-
-    try {
-      return await raceCaptures(attempts, CAPTURE_TIMEOUT_MS);
-    } catch (e) {
-      const detail = (e as Error).message;
-      throw new Error(
-        `could not capture an Outlook token from the browser (${detail}). ` +
-          'Open a signed-in Outlook tab (outlook.cloud.microsoft or ' +
-          'outlook.office.com), leave it in the foreground for a moment so the ' +
-          'page makes a request, and retry.',
-      );
-    }
-  } finally {
-    try {
-      await transport.close();
-    } catch {
-      /* the token, or the original failure, is what matters */
-    }
-  }
 }

@@ -10,6 +10,8 @@ import {
   mapWithConcurrency,
   McpToolError,
   minifiedResult,
+  unknownOutcomeReason,
+  writeOrUnknown as runWriteOrUnknown,
   WriteOutcomeUnknownError,
 } from '@chrischall/mcp-utils';
 import { isCredentialFailure, type OutlookClient } from '../client.js';
@@ -134,22 +136,13 @@ const TIMEOUT_SENTENCE =
  * send a second identical email. Any other failure is a real failure and
  * still throws.
  */
-async function writeOrUnknown<T>(
-  run: () => Promise<T>,
-  checkWhere: string,
-): Promise<{ ok: true; value: T } | { ok: false; result: ReturnType<typeof minifiedResult> }> {
-  try {
-    return { ok: true, value: await run() };
-  } catch (e) {
-    if (!(e instanceof WriteOutcomeUnknownError)) throw e;
-    return {
-      ok: false,
-      result: minifiedResult({
-        status: 'unknown',
-        warning: `Outlook did not confirm this write (${e.timedOut ? 'it did not answer in time' : 'the connection dropped'}), so it may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
-      }),
-    };
-  }
+function writeOrUnknown<T>(run: () => Promise<T>, checkWhere: string) {
+  return runWriteOrUnknown(run, (e) =>
+    minifiedResult({
+      status: 'unknown',
+      warning: `Outlook did not confirm this write (${unknownOutcomeReason(e)}), so it may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
+    }),
+  );
 }
 
 const INVITE_EVENT_SELECT = 'Id,Subject,IsOrganizer,IsCancelled,Start,End,Organizer,ResponseStatus';
