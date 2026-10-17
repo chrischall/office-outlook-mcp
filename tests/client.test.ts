@@ -153,7 +153,42 @@ describe('requests', () => {
     });
     const err = await c.post('/me/findmeetingtimes', {}).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(WriteOutcomeUnknownError);
-    expect(String(err)).toMatch(/fetch failed/);
+    expect(String(err)).toMatch(/Could not reach Outlook at outlook\.office\.com/);
+  });
+
+  it('names the host and the cause of a request that never got a response, not a bare "fetch failed"', async () => {
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND outlook.office.com'), { code: 'ENOTFOUND' });
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed', { cause });
+    });
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const err = await c.get('/me/messages', { query: { $top: 5 } }).catch((e: unknown) => e);
+    expect(err).toMatchObject({
+      kind: 'transport',
+      message: expect.stringMatching(/^Could not reach Outlook at outlook\.office\.com \(ENOTFOUND: getaddrinfo/),
+      hint: expect.stringMatching(/nslookup outlook\.office\.com/),
+    });
+    // The host only: never the path or query.
+    expect((err as Error).message).not.toMatch(/messages|top/);
+  });
+
+  it('still reports a write whose connection fails as outcome-unknown, naming the host', async () => {
+    const cause = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed', { cause });
+    });
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const err = await c.write('POST', '/me/sendmail', {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WriteOutcomeUnknownError);
+    expect((err as Error).message).toMatch(/Could not reach Outlook at outlook\.office\.com \(ECONNRESET/);
   });
 
   it('reports a write that loses its connection as outcome-unknown', async () => {

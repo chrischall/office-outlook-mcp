@@ -1,5 +1,6 @@
 import {
   createFileStatePersistence,
+  isBearerTokens,
   resolveStateFile,
   type BearerTokens,
   type SyncStatePersistence,
@@ -20,17 +21,6 @@ export function tokenCachePath(env: NodeJS.ProcessEnv = process.env): string {
     subdir: '.office-outlook-mcp',
     fileName: 'token.json',
   });
-}
-
-function isToken(raw: unknown): raw is BearerTokens {
-  if (raw === null || typeof raw !== 'object') return false;
-  const t = raw as Partial<BearerTokens>;
-  return (
-    typeof t.accessToken === 'string' &&
-    t.accessToken !== '' &&
-    typeof t.expiresAt === 'number' &&
-    (t.refreshToken === undefined || typeof t.refreshToken === 'string')
-  );
 }
 
 /**
@@ -60,7 +50,7 @@ export function createTokenCache(
   return createFileStatePersistence<BearerTokens>({
     filePath: tokenCachePath(env),
     boundTo,
-    validate: (raw) => (isToken(raw) ? raw : null),
+    validate: (raw) => (isBearerTokens(raw) ? raw : null),
   });
 }
 

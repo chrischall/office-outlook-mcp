@@ -8,7 +8,7 @@
  */
 import {
   createApiClient,
-  decodeJwtExp,
+  describeTransportFailure,
   errorKindOf,
   errorStatusOf,
   McpToolError,
@@ -16,7 +16,7 @@ import {
   readEnvVar,
   type ApiClient,
 } from '@chrischall/mcp-utils';
-import { TokenManager, type BearerTokens } from '@chrischall/mcp-utils/session';
+import { createCapturedTokenManager, type TokenManager } from '@chrischall/mcp-utils/session';
 import { createTokenCache, reportCacheWriteFailure } from './token-cache.js';
 
 /**
@@ -49,36 +49,10 @@ export type QueryParams = Record<string, string | number | undefined>;
  */
 export const DEFAULT_API_BASE = 'https://outlook.office.com/api/v2.0';
 
-/**
- * Fallback lifetime for a token whose `exp` we cannot read.
- *
- * Real Outlook tokens are JWTs carrying `exp` (~25h out), so this is only
- * reached for a hand-supplied opaque `OUTLOOK_ACCESS_TOKEN`. Deliberately
- * short: being wrong in this direction costs one extra 401-and-replay, while
- * being wrong the other way makes every call fail until a restart.
- */
-const UNKNOWN_TOKEN_TTL_MS = 10 * 60 * 1000;
-
-/**
- * Sentinel standing in for a refresh token this flow does not have.
- *
- * Outlook Web's token comes from MSAL's hidden-iframe flow; there is no refresh
- * grant we can drive. "Refreshing" therefore means capturing a new one. The
- * sentinel exists because `TokenManager` only calls `refresh` when a refresh
- * token is present, and without it an expired token would have no path back
- * short of restarting the process.
- */
-const RECAPTURE_SENTINEL = 'fetchproxy:recapture';
-
-function toBearerTokens(accessToken: string): BearerTokens {
-  let expiresAt: number;
-  try {
-    // decodeJwtExp returns seconds; a non-JWT throws.
-    expiresAt = decodeJwtExp(accessToken) * 1000;
-  } catch {
-    expiresAt = Date.now() + UNKNOWN_TOKEN_TTL_MS;
-  }
-  return { accessToken, refreshToken: RECAPTURE_SENTINEL, expiresAt };
+/** The URL a `fetch` was called with, for naming its host in a transport failure. */
+function urlOf(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.href : input.url;
 }
 
 export interface OutlookClientOptions {
@@ -123,7 +97,19 @@ export class OutlookClient {
     // and calling it as `this.#fetchImpl(...)` binds `this` to the client, and
     // older undici (Node 18-20, which several MCP hosts still bundle) throws
     // `Illegal invocation` for any receiver that is not `globalThis`.
-    this.#fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+    const fetchImpl: typeof fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+    // undici reports every transport failure (DNS, refused/reset connection,
+    // untrusted TLS, a proxy refusing the tunnel) as a bare `TypeError('fetch
+    // failed')`; name the host, the cause code and what to check instead. The
+    // client still marks it a transport failure, so a sent write whose
+    // connection drops stays outcome-unknown.
+    this.#fetchImpl = async (input, init) => {
+      try {
+        return await fetchImpl(input, init);
+      } catch (e) {
+        throw describeTransportFailure(e, urlOf(input), 'Outlook') ?? e;
+      }
+    };
     this.#baseUrl = readEnvVar('OUTLOOK_API_BASE', { env: this.#env }) ?? DEFAULT_API_BASE;
 
     const direct = readEnvVar('OUTLOOK_ACCESS_TOKEN', { env: this.#env });
@@ -152,60 +138,33 @@ export class OutlookClient {
   }
 
   #tokenManager(): TokenManager {
-    if (this.#tokens) return this.#tokens;
-
     const direct = readEnvVar('OUTLOOK_ACCESS_TOKEN', { env: this.#env });
-    const persistence = direct === undefined ? createTokenCache(this.#env) : null;
-    const mint = async (): Promise<BearerTokens> =>
-      toBearerTokens(direct ?? (await this.#capture()));
-
-    this.#tokens = new TokenManager({
-      initial: mint,
-      // There is no refresh grant — re-capture instead. The sentinel argument
-      // is ignored by design.
-      //
-      // But a token supplied as OUTLOOK_ACCESS_TOKEN must NOT be "refreshed" by
-      // reaching for the browser: that silently swaps the credential the
-      // operator chose for whichever account a tab happens to be signed into,
-      // and on a machine with no bridge it just hangs for the capture window on
-      // every 401. Say what is wrong instead.
-      refresh: async () => {
-        if (direct !== undefined) {
-          throw new McpToolError('OUTLOOK_ACCESS_TOKEN was rejected by Outlook.', {
-            hint:
-              'A directly-supplied token cannot be refreshed automatically. Replace ' +
-              'OUTLOOK_ACCESS_TOKEN with a current one, or unset it to capture from a ' +
-              'signed-in Outlook browser tab instead.',
-            status: 401,
-            kind: 'credential_rejected',
-          });
-        }
-        return toBearerTokens(await this.#capture());
-      },
-      // A failed cache write must not fail the call that triggered it: the
-      // token is in hand and re-capturable, so a read-only data dir should cost
-      // the next cold start a capture, not this request.
-      ...(persistence
-        ? {
-            persistence: {
-              load: () => persistence.load(),
-              save: (t: BearerTokens) => {
-                try {
-                  persistence.save(t);
-                } catch (e) {
-                  reportCacheWriteFailure(e);
-                }
-              },
-              clear: () => {
-                try {
-                  persistence.clear();
-                } catch {
-                  /* nothing useful to do; the next capture overwrites it */
-                }
-              },
-            },
-          }
-        : {}),
+    // Captures on first use (or loads a still-valid cached capture); there is
+    // no refresh grant, so a 401 or an expiring token re-captures instead.
+    //
+    // But a token supplied as OUTLOOK_ACCESS_TOKEN is never cached and never
+    // "refreshed" by reaching for the browser: that silently swaps the
+    // credential the operator chose for whichever account a tab happens to be
+    // signed into, and on a machine with no bridge it just hangs for the
+    // capture window on every 401. Say what is wrong instead.
+    //
+    // A failed cache write must not fail the call that triggered it: the
+    // token is in hand and re-capturable, so a read-only data dir should cost
+    // the next cold start a capture, not this request.
+    this.#tokens ??= createCapturedTokenManager({
+      capture: () => this.#capture(),
+      direct,
+      onDirectRejected: () =>
+        new McpToolError('OUTLOOK_ACCESS_TOKEN was rejected by Outlook.', {
+          hint:
+            'A directly-supplied token cannot be refreshed automatically. Replace ' +
+            'OUTLOOK_ACCESS_TOKEN with a current one, or unset it to capture from a ' +
+            'signed-in Outlook browser tab instead.',
+          status: 401,
+          kind: 'credential_rejected',
+        }),
+      persistence: direct === undefined ? createTokenCache(this.#env) : null,
+      onPersistError: reportCacheWriteFailure,
     });
     return this.#tokens;
   }

@@ -19,7 +19,7 @@ export default defineConfig({
        * RAISE THEM as coverage improves.
        *
        * What remains uncovered is uncovered for a reason worth stating:
-       * `captureTokenLazily` in client.ts and the capture race in
+       * `captureTokenLazily` in client.ts and `captureTokenViaFetchproxy` in
        * auth-fetchproxy.ts both need a live browser bridge, which this suite
        * deliberately cannot have — tests/_setup.ts exists to guarantee it
        * never does. Those paths were verified by hand against a real mailbox;
