@@ -5,6 +5,12 @@ summary: >-
   Outlook / Microsoft 365 for Claude — triage unread mail, reply, answer meeting
   invites and schedule meetings, plus folders, calendar, contacts and tasks,
   with confirmation before anything is sent
+examples:
+  - prompt: Go through my unread Outlook inbox and summarise what needs a reply today.
+    note: Reads unread mail with bodies in one batch; nothing is marked read.
+  - prompt: What's on my work calendar for the rest of this week?
+    note: Recurring meetings are expanded into their individual occurrences.
+  - prompt: Which of my Outlook tasks are due this week?
 #
 # Hosting note (a comment, not user-facing summary text): this MCP mints its
 # credential through the fetchproxy BROWSER BRIDGE. It is not a full-bridge
