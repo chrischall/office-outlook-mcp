@@ -103,6 +103,7 @@ Everything is optional — with nothing set, the server captures from the browse
 | `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Bounds the WHOLE capture, both declared hosts included. Defaults to `30`. |
 | `OUTLOOK_TOKEN_CACHE` | `false` to stop caching the token between runs. |
 | `OUTLOOK_TOKEN_FILE` | Path to the cached token. Defaults to `~/.office-outlook-mcp/token.json`. |
+| `OUTLOOK_OUTPUT_DIR` | Absolute directory `outlook_export_messages` and `outlook_export_events` write into. Defaults to `~/Downloads/office-outlook-mcp`. When set, a per-call `dest` must be inside it. See [Bulk export](#bulk-export). |
 
 ## Tools
 
@@ -146,6 +147,10 @@ what that decision needs in every view: `MyResponse`, `ResponseRequested`,
 `IsOrganizer`, `IsCancelled`, `Type` (SingleInstance, Occurrence, Exception or
 SeriesMaster), `ShowAs` and `IsAllDay`, plus `SeriesMasterId` in the full view.
 
+**Export** — `outlook_export_messages` (mail) and `outlook_export_events`
+(calendar) write JSONL or Markdown files, optionally with attachments, and
+return only where they are; see [Bulk export](#bulk-export).
+
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
@@ -157,8 +162,9 @@ the one read a preview makes.)
 
 Mail and event text is written by other people, so `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_unread_messages`, `outlook_get_attachment`,
-`outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times` and
-`outlook_get_schedule` wrap every result (all views) in an untrusted-content
+`outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times`,
+`outlook_get_schedule`, `outlook_export_messages` and `outlook_export_events`
+wrap every result (all views) in an untrusted-content
 envelope — `untrusted_content: true` plus a `note` telling the model to treat
 the text as data, never instructions (a `view: raw` record that carries its
 own `untrusted_content`/`note` key is nested under `data`, so it cannot
@@ -217,6 +223,70 @@ keep polling with the last `next_from` to pick up new mail (an empty page
 returns the same position). Messages that share a timestamp are never skipped
 or repeated across pages, and marking mail read between pages loses nothing.
 `from` cannot be combined with `nextLink`, `sinceHours`, `search` or `skip`.
+
+## Bulk export
+
+`outlook_export_messages` exports mail and `outlook_export_events` exports
+the calendar in bulk, thousands of records at a time, and none of their text
+enters the conversation. The server pages the mailbox (or calendar) and writes
+the records to files. The tool returns only a small manifest: where the files
+are, their sizes, the record and attachment counts, the date span, and
+`has_more` plus a `cursor`. Have the agent read the files with shell tools
+(`jq`, `grep`, `rg`, `head`) rather than opening them whole.
+
+- **Mail arguments:** `folder` (a well-known name such as `inbox` or
+  `sentitems`, or a folder id; `all` exports the whole mailbox; default
+  `inbox`), `since` and `until` (ISO 8601), `search` (full-text, spans the
+  mailbox). Mail is exported oldest first.
+- **Event arguments:** `since` and `until` (ISO 8601, both required, at most
+  two years apart) and `calendar` (a calendar id; default, the default
+  calendar). Events come from the calendar view, so a recurring series is
+  expanded into its individual occurrences. Times are wall-clock times in the
+  mailbox's time zone, named on each record as `time_zone`.
+- **Both:** `format` (`jsonl`, the default, or `markdown`), `attachments`
+  (default `false`), `dest`, `cursor`, `max_items` (default 5000, max 50000)
+  and `budget_seconds` (default 90, max 600).
+- **Files:** `part-0001.jsonl` holds one JSON record per message (id,
+  conversation id, subject, from, to/cc/bcc, dates, flags, categories, web link
+  and the full plain-text body). Its first line is an `_export` header that
+  names the source, account, arguments and an untrusted-content note.
+  An event record carries the id, iCal UID, type and series id, subject,
+  start, end, time zone, location, organizer, attendees with their responses,
+  your response, show-as, categories, the join link and the full plain-text
+  body.
+  `format: "markdown"` writes `part-0001.md`, a readable transcript (one
+  section per message or event), instead.
+  `manifest.json` lists the counts and any errors, and the files: on disk
+  every part's files (it is rewritten as each part finishes); in a blob zip
+  the files in that zip.
+- **Attachments:** with `attachments: true`, each file attachment of up to
+  50 MB is saved as `attachments/<short id>/<name>` (the name sanitized), and
+  the record lists its attachments, each with its relative `path`, or with
+  `skipped` and the reason. Attached Outlook items (a forwarded email or
+  event), cloud-file links (OneDrive/SharePoint), larger files and failed
+  downloads are skipped. One bad attachment never fails the export.
+- **Resuming:** each call stops at `max_items` or `budget_seconds`, whichever
+  comes first. While `has_more` is true, pass `cursor` back unchanged. The
+  next call continues the same export as `part-0002`, `part-0003` and so on.
+  With attachments on, the budget is checked between small groups of
+  records, so a stop can fall inside a page; the cursor resumes at the next
+  record. If Outlook refuses the credential (including while downloading an
+  attachment), or keeps returning 429 after three
+  Retry-After waits, the call keeps what it already wrote and returns the
+  cursor. Re-authenticate, then resume.
+
+Where the files go depends on how the server runs:
+
+| mode | when | `location` in the result |
+| --- | --- | --- |
+| `disk` | any local (stdio) install, the default | an **absolute local directory**, `<dir>/outlook-mail-<YYYYMMDD-HHmmss>/` (or `outlook-events-…`); each file entry carries its absolute `path` |
+| `blob` | hosted on mcp-host, which sets both `MCP_BLOB_BASE_URL` and `MCP_BLOB_SIGNING_KEY` | a **signed download link** to one zip per call (`part-NNNN.zip`, which includes `manifest.json`), valid for **1 hour** (`url_expires_at`) |
+
+On disk, `<dir>` is the per-call `dest`, else `OUTLOOK_OUTPUT_DIR`, else
+`~/Downloads/office-outlook-mcp`. A `dest` must be inside `OUTLOOK_OUTPUT_DIR`
+when that is set. Otherwise it must be inside `~/Downloads`, `~/Documents` or
+`~/Desktop`. A resumed cursor's directory is checked against the same roots
+again.
 
 ## Confirmations
 

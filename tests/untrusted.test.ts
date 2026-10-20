@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerMailTools } from '../src/tools/mail.js';
 import { registerCalendarTools } from '../src/tools/calendar.js';
 import { registerWriteTools } from '../src/tools/writes.js';
+import { registerExportTools } from '../src/tools/export.js';
 import type { OutlookClient } from '../src/client.js';
 
 /**
@@ -59,6 +63,59 @@ describe('third-party text is framed as untrusted', () => {
     const tool = (await h.listTools()).find((t) => t.name === name);
     expect(tool?.description).toMatch(/untrusted/i);
     await h.close();
+  });
+
+  it.each(['outlook_export_messages', 'outlook_export_events'])(
+    '%s says in its description that exported text is untrusted',
+    async (name) => {
+      const h = await createTestHarness((s: McpServer) => registerExportTools(s, client()));
+      const tool = (await h.listTools()).find((t) => t.name === name);
+      expect(tool?.description).toMatch(/untrusted/i);
+      await h.close();
+    },
+  );
+
+  it('outlook_export_events wraps its manifest in the envelope and returns none of the third-party text', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'outlook-untrusted-export-'));
+    try {
+      const h = await createTestHarness((s: McpServer) =>
+        registerExportTools(s, client(), { env: { OUTLOOK_OUTPUT_DIR: dir }, sleep: async () => {} }),
+      );
+      const res = await h.callTool('outlook_export_events', {
+        since: '2026-09-20T00:00:00Z',
+        until: '2026-09-27T00:00:00Z',
+        max_items: 1,
+      });
+      await h.close();
+      const text = (res.content as { type: string; text: string }[])[0].text;
+      const parsed = parseToolResult<Record<string, unknown>>(res);
+      expect(parsed.untrusted_content).toBe(true);
+      expect(String(parsed.note)).toMatch(/not instructions/i);
+      expect(text).not.toContain(INJECTION);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('outlook_export_messages wraps its manifest in the envelope and returns none of the third-party text', async () => {
+    // By design the export writes bodies and subjects to files and returns only
+    // a manifest, so the injection must be absent from the result entirely —
+    // while the envelope still frames the file names and paths it does echo.
+    const dir = mkdtempSync(join(tmpdir(), 'outlook-untrusted-export-'));
+    try {
+      const h = await createTestHarness((s: McpServer) =>
+        registerExportTools(s, client(), { env: { OUTLOOK_OUTPUT_DIR: dir }, sleep: async () => {} }),
+      );
+      const res = await h.callTool('outlook_export_messages', { folder: 'all' });
+      await h.close();
+      const text = (res.content as { type: string; text: string }[])[0].text;
+      const parsed = parseToolResult<Record<string, unknown>>(res);
+      expect(parsed.untrusted_content).toBe(true);
+      expect(String(parsed.note)).toMatch(/not instructions/i);
+      expect(text).not.toContain(INJECTION);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('a raw upstream object with its own note/untrusted_content keys cannot overwrite the fence', async () => {

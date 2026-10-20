@@ -144,7 +144,7 @@ function stripUndefined(o: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** Metadata probe for one attachment: never the bytes. */
-const ATTACHMENT_META_SELECT = 'Id,Name,ContentType,Size,IsInline';
+export const ATTACHMENT_META_SELECT = 'Id,Name,ContentType,Size,IsInline';
 
 /** Above this an attachment is never inlined, whatever its type (base64 inflates it ~4/3 again). */
 const MAX_INLINE_BYTES = 5 * 1024 * 1024;
@@ -159,7 +159,7 @@ const MAX_TEXT_BYTES = 200 * 1024;
 const TEXT_TYPE = /^text\/|^application\/(json|xml|csv|ics|calendar)\b|\+(json|xml)$/i;
 const TEXT_EXT = /\.(txt|csv|tsv|json|xml|ics|md|log|html?)$/i;
 
-interface OutlookAttachment {
+export interface OutlookAttachment {
   '@odata.type'?: string;
   Id?: string;
   Name?: string;
@@ -169,9 +169,9 @@ interface OutlookAttachment {
   ContentBytes?: string;
 }
 
-type AttachmentKind = 'file' | 'item' | 'reference';
+export type AttachmentKind = 'file' | 'item' | 'reference';
 
-function attachmentKind(a: OutlookAttachment): AttachmentKind {
+export function attachmentKind(a: OutlookAttachment): AttachmentKind {
   const type = a['@odata.type'] ?? '';
   if (/ItemAttachment$/.test(type)) return 'item';
   if (/ReferenceAttachment$/.test(type)) return 'reference';
@@ -188,7 +188,7 @@ function isText(contentType: string, name: string): boolean {
 }
 
 /** Decoded size of a base64 string, without decoding it (an upper bound if it has stray characters). */
-function base64DecodedLength(b64: string): number {
+export function base64DecodedLength(b64: string): number {
   const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
   return Math.floor((b64.length * 3) / 4) - padding;
 }
