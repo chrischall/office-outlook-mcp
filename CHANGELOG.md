@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.6.2...v0.7.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** rename tools to the list/get naming rule ([#89](https://github.com/chrischall/office-outlook-mcp/issues/89))
+
+### Features
+
+* **export:** bulk-export mail and calendar to local files or a download link ([#90](https://github.com/chrischall/office-outlook-mcp/issues/90)) ([0bf92a8](https://github.com/chrischall/office-outlook-mcp/commit/0bf92a834fb3dd8e1a7ed84c1de595c5749f40dd))
+* **tools:** rename tools to the list/get naming rule ([#89](https://github.com/chrischall/office-outlook-mcp/issues/89)) ([b4d017b](https://github.com/chrischall/office-outlook-mcp/commit/b4d017b24efe629eb74e309fc6a243ade2f76024))
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv from 18.0.6 to 18.0.8 in the production-dependencies group ([#83](https://github.com/chrischall/office-outlook-mcp/issues/83)) ([26a1c4f](https://github.com/chrischall/office-outlook-mcp/commit/26a1c4fe3c6451d68d928f1174a8c1b17da32503))
+
+
+### Documentation
+
+* **mint:** add a note to the tasks sample prompt ([#88](https://github.com/chrischall/office-outlook-mcp/issues/88)) ([278ffb6](https://github.com/chrischall/office-outlook-mcp/commit/278ffb6561e0bc9b75d2ceca22ee56c7f2e239cb))
+* **mint:** add sample prompts for the public catalog ([#86](https://github.com/chrischall/office-outlook-mcp/issues/86)) ([adfd112](https://github.com/chrischall/office-outlook-mcp/commit/adfd1124eea28ca60ae84167f870d372cd7cb6f1))
+
 ## [0.6.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.6.1...v0.6.2) (2026-10-17)
 
 
