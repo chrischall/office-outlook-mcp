@@ -256,8 +256,9 @@ are, their sizes, the record and attachment counts, the date span, and
   body.
   `format: "markdown"` writes `part-0001.md`, a readable transcript (one
   section per message or event), instead.
-  `manifest.json` lists the files written by the latest part, the counts and
-  any errors.
+  `manifest.json` lists the counts and any errors, and the files: on disk
+  every part's files (it is rewritten as each part finishes); in a blob zip
+  the files in that zip.
 - **Attachments:** with `attachments: true`, each file attachment of up to
   50 MB is saved as `attachments/<short id>/<name>` (the name sanitized), and
   the record lists its attachments, each with its relative `path`, or with
@@ -267,7 +268,10 @@ are, their sizes, the record and attachment counts, the date span, and
 - **Resuming:** each call stops at `max_items` or `budget_seconds`, whichever
   comes first. While `has_more` is true, pass `cursor` back unchanged. The
   next call continues the same export as `part-0002`, `part-0003` and so on.
-  If Outlook refuses the credential, or keeps returning 429 after three
+  With attachments on, the budget is checked between small groups of
+  records, so a stop can fall inside a page; the cursor resumes at the next
+  record. If Outlook refuses the credential (including while downloading an
+  attachment), or keeps returning 429 after three
   Retry-After waits, the call keeps what it already wrote and returns the
   cursor. Re-authenticate, then resume.
 

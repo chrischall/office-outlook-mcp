@@ -6,6 +6,7 @@ import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerExportTools, type ExportToolOptions } from '../src/tools/export.js';
 import type { OutlookClient } from '../src/client.js';
+import { encodeExportCursor } from '@chrischall/mcp-utils/export';
 
 /**
  * `outlook_export_events` — bulk export of the calendar VIEW (recurrences
@@ -209,6 +210,21 @@ describe('outlook_export_events', () => {
     expect(m.cursor).toBeTruthy();
     const res = await call(stub().client, { cursor: m.cursor });
     expect(res.isError).toBe(true);
+  });
+
+  it('refuses a cursor whose time zone could rewrite the Prefer header', async () => {
+    const s = stub();
+    const cursor = encodeExportCursor({
+      kind: 'events',
+      exportId: 'abcdef0123456789',
+      part: 2,
+      args: { ...WINDOW, format: 'jsonl', time_zone: 'UTC", odata.maxpagesize=1, x="' },
+      pos: { offset: 0 },
+      totals: { items: 0 },
+    });
+    const res = await call(s.client, { cursor });
+    expect(res.isError).toBe(true);
+    expect(s.calls.some((c) => c.opts?.prefer !== undefined)).toBe(false);
   });
 
   it('writes one Markdown section per event with format: markdown', async () => {

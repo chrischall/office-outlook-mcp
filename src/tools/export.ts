@@ -38,10 +38,15 @@
  * attachment's bytes are fetched one by one and written under
  * `attachments/<short id>/<sanitized name>`. Attached Outlook items, cloud-file
  * links, files over 50 MB and failed downloads are recorded on the record as
- * `skipped` with the reason — one attachment never fails an export.
+ * `skipped` with the reason — one attachment never fails an export. A
+ * credential failure is different: it stops the run before the record is
+ * written, so the resumed call fetches that record and its attachments again.
+ * Records are committed a group at a time (attachment bytes are held in memory
+ * until then), with the budget and cancellation checked between groups.
  */
 import { createHash } from 'node:crypto';
-import { rmdirSync } from 'node:fs';
+import { readFileSync, rmdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
@@ -92,6 +97,14 @@ const EPOCH = '1970-01-01T00:00:00Z';
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 /** Records whose attachments are fetched at once. */
 const ATTACHMENT_CONCURRENCY = 4;
+/**
+ * Rows asked for per request when attachments are saved. The budget and
+ * cancellation are checked between groups of ATTACHMENT_CONCURRENCY records,
+ * so a small page keeps a call close to `budget_seconds`.
+ */
+const ATTACHMENT_PAGE_SIZE = 50;
+/** A time zone name safe to put inside the quoted Prefer header value (Windows or IANA names). */
+const TIME_ZONE_NAME = /^[A-Za-z0-9_+\-/ ().:]+$/;
 /** Widest calendar window one export takes. */
 const MAX_EVENT_SPAN_MS = 731 * 24 * 60 * 60 * 1000;
 
@@ -207,7 +220,8 @@ const eventArgsSchema = z.object({
   since: z.string().min(1),
   until: z.string().min(1),
   calendar: z.string().min(1).optional(),
-  time_zone: z.string().min(1).optional(),
+  // A cursor is model-supplied text and this goes into a quoted header value.
+  time_zone: z.string().min(1).max(100).regex(TIME_ZONE_NAME).optional(),
   format: z.enum(['jsonl', 'markdown']),
   attachments: z.boolean().optional(),
 });
@@ -459,6 +473,8 @@ interface Batch<R> {
   pos: Position;
   hasMore: boolean;
   stop?: string;
+  /** Where the next part starts if only the first `n` rows are kept (a stop mid-page). */
+  posAfter: (n: number) => Position;
 }
 
 /**
@@ -478,16 +494,24 @@ async function linkBatch<R>(
   const rows = (Array.isArray(data?.value) ? data.value : []).slice(pos.offset);
   const next = data?.['@odata.nextLink'];
   const taken: R[] = [];
+  /** Rows consumed from this page up to and including each taken row. */
+  const consumedAt: number[] = [];
   let consumed = 0;
   for (const r of rows) {
     if (taken.length >= limit) break;
     consumed++;
-    if (keep(r)) taken.push(r);
+    if (keep(r)) {
+      taken.push(r);
+      consumedAt.push(consumed);
+    }
   }
-  if (consumed < rows.length) {
-    return { rows: taken, pos: { ...(link !== undefined ? { link } : {}), offset: pos.offset + consumed }, hasMore: true };
-  }
-  return { rows: taken, pos: { ...(next ? { link: next } : {}), offset: 0 }, hasMore: Boolean(next) };
+  const here = (offset: number): LinkPosition => ({ ...(link !== undefined ? { link } : {}), offset });
+  const end: Batch<R> =
+    consumed < rows.length
+      ? { rows: taken, pos: here(pos.offset + consumed), hasMore: true, posAfter: () => end.pos }
+      : { rows: taken, pos: { ...(next ? { link: next } : {}), offset: 0 }, hasMore: Boolean(next), posAfter: () => end.pos };
+  end.posAfter = (n) => (n >= taken.length ? end.pos : here(pos.offset + (n > 0 ? consumedAt[n - 1] : 0)));
+  return end;
 }
 
 // ---------------------------------------------------------------------------
@@ -518,35 +542,57 @@ interface AttachmentRun {
   files: ExportFileRecord[];
   saved: number;
   skipped: number;
+  /** Set on a credential failure: no further attachment request is made. */
+  failure?: unknown;
+}
+
+/** The run is stopping (cancelled, or a credential failure elsewhere): the record is not committed. */
+class ExportStopped extends Error {}
+
+/** One record's attachments, fetched but not yet written to the sink. */
+interface FetchedAttachments {
+  entries: AttachmentEntry[];
+  pending: { entry: AttachmentEntry; relPath: string; bytes: Buffer; contentType?: string }[];
+  skipped: number;
 }
 
 /**
- * Save one record's attachments. `base` is the item's path
- * (`/me/messages/{id}` or `/me/events/{id}`). Never throws: every failure is
- * recorded on the entry it concerns.
+ * Fetch one record's attachments into memory. `base` is the item's path
+ * (`/me/messages/{id}` or `/me/events/{id}`). An ordinary failure is recorded
+ * on the entry it concerns; a credential failure (or cancellation) throws, so
+ * the record is left for the resumed call instead of being written with its
+ * attachments marked skipped.
  */
-async function saveAttachments(run: AttachmentRun, base: string, recordId: string): Promise<AttachmentEntry[]> {
+async function fetchAttachments(run: AttachmentRun, base: string, recordId: string): Promise<FetchedAttachments> {
   const { client, sleep } = run;
+  const guard = <T>(fn: () => Promise<T>) => {
+    if (run.failure !== undefined || currentCallSignal()?.aborted) throw new ExportStopped();
+    return with429Retry(fn, sleep).catch((e: unknown) => {
+      if (isCredentialFailure(e)) run.failure ??= e;
+      throw e;
+    });
+  };
+  const result: FetchedAttachments = { entries: [], pending: [], skipped: 0 };
   let metas: OutlookAttachment[] = [];
   try {
-    let page = await with429Retry(
-      () => client.get<Page<OutlookAttachment>>(`${base}/attachments`, { query: { $select: ATTACHMENT_META_SELECT } }),
-      sleep,
+    let page = await guard(() =>
+      client.get<Page<OutlookAttachment>>(`${base}/attachments`, { query: { $select: ATTACHMENT_META_SELECT } }),
     );
     metas = Array.isArray(page?.value) ? [...page.value] : [];
     while (page?.['@odata.nextLink']) {
       const link = page['@odata.nextLink'];
-      page = await with429Retry(() => client.getAbsolute<Page<OutlookAttachment>>(link), sleep);
+      page = await guard(() => client.getAbsolute<Page<OutlookAttachment>>(link));
       if (Array.isArray(page?.value)) metas.push(...page.value);
     }
   } catch (e) {
-    run.skipped++;
-    return [{ skipped: `listing attachments failed: ${short(e)}` }];
+    if (e instanceof ExportStopped || isCredentialFailure(e)) throw e;
+    result.skipped++;
+    result.entries.push({ skipped: `listing attachments failed: ${short(e)}` });
+    return result;
   }
 
   const dir = `attachments/${shortId(recordId)}`;
   const used = new Set<string>();
-  const out: AttachmentEntry[] = [];
   for (const meta of metas) {
     const kind = attachmentKind(meta);
     const entry: AttachmentEntry = {
@@ -557,10 +603,10 @@ async function saveAttachments(run: AttachmentRun, base: string, recordId: strin
       ...(meta.IsInline ? { is_inline: true } : {}),
       kind,
     };
-    out.push(entry);
+    result.entries.push(entry);
     const skip = (why: string) => {
       entry.skipped = why;
-      run.skipped++;
+      result.skipped++;
     };
     if (kind === 'item') {
       skip('attached Outlook item (an email, event or contact), not a file');
@@ -578,44 +624,66 @@ async function saveAttachments(run: AttachmentRun, base: string, recordId: strin
       skip('download failed: Outlook listed it without an id');
       continue;
     }
-    if (currentCallSignal()?.aborted) {
-      skip('cancelled before download');
-      continue;
-    }
+    let full: OutlookAttachment;
     try {
       // The single-attachment GET returns the whole FileAttachment, ContentBytes
       // included — the same request outlook_get_attachment makes. A `$select`
       // naming ContentBytes is avoided: it is a property of the derived
       // FileAttachment type, not of Attachment.
       const id = meta.Id;
-      const full = await with429Retry(
-        () => client.get<OutlookAttachment>(`${base}/attachments/${encodeURIComponent(id)}`),
-        sleep,
-      );
-      const b64 = full?.ContentBytes;
-      if (typeof b64 !== 'string') {
-        skip('download failed: Outlook returned no content');
-        continue;
-      }
-      // Size is Outlook's figure for the whole record; the base64 length bounds the file.
-      if (base64DecodedLength(b64) > MAX_ATTACHMENT_BYTES) {
-        skip('too large (over the 50 MB cap)');
-        continue;
-      }
-      const name = uniqueName(sanitizeExportFileName(meta.Name || full.Name || `attachment-${out.length}`), used);
-      const rec = await run.sink.addFile(
-        `${dir}/${name}`,
-        Buffer.from(b64, 'base64'),
-        meta.ContentType || full.ContentType || undefined,
-      );
-      entry.path = rec.name;
+      full = await guard(() => client.get<OutlookAttachment>(`${base}/attachments/${encodeURIComponent(id)}`));
+    } catch (e) {
+      if (e instanceof ExportStopped || isCredentialFailure(e)) throw e;
+      skip(`download failed: ${short(e)}`);
+      continue;
+    }
+    const b64 = full?.ContentBytes;
+    if (typeof b64 !== 'string') {
+      skip('download failed: Outlook returned no content');
+      continue;
+    }
+    // Size is Outlook's figure for the whole record; the base64 length bounds the file.
+    if (base64DecodedLength(b64) > MAX_ATTACHMENT_BYTES) {
+      skip('too large (over the 50 MB cap)');
+      continue;
+    }
+    const name = uniqueName(sanitizeExportFileName(meta.Name || full.Name || `attachment-${result.entries.length - 1}`), used);
+    result.pending.push({
+      entry,
+      relPath: `${dir}/${name}`,
+      bytes: Buffer.from(b64, 'base64'),
+      contentType: meta.ContentType || full.ContentType || undefined,
+    });
+  }
+  return result;
+}
+
+/** Write a committed record's fetched attachments to the sink and count them. */
+async function commitAttachments(run: AttachmentRun, fetched: FetchedAttachments): Promise<AttachmentEntry[]> {
+  run.skipped += fetched.skipped;
+  for (const p of fetched.pending) {
+    try {
+      const rec = await run.sink.addFile(p.relPath, p.bytes, p.contentType);
+      p.entry.path = rec.name;
       run.files.push(rec);
       run.saved++;
     } catch (e) {
-      skip(`download failed: ${short(e)}`);
+      p.entry.skipped = `write failed: ${short(e)}`;
+      run.skipped++;
     }
   }
-  return out;
+  return fetched.entries;
+}
+
+/** The index just past the next ATTACHMENT_CONCURRENCY records (from `from`) that have attachments to fetch. */
+function groupEnd<T>(items: T[], from: number, wanted: (item: T) => boolean): number {
+  let n = 0;
+  let i = from;
+  while (i < items.length && n < ATTACHMENT_CONCURRENCY) {
+    if (wanted(items[i])) n++;
+    i++;
+  }
+  return i;
 }
 
 // ---------------------------------------------------------------------------
@@ -681,29 +749,55 @@ async function runExport<R, A extends CommonArgs>(
   let hasMore = true;
   let credentialFailed = false;
 
+  const stopNow = () => currentCallSignal()?.aborted === true || clock() >= deadline;
+
   try {
     while (hasMore && written < maxItems) {
-      if (currentCallSignal()?.aborted || clock() >= deadline) break;
+      if (stopNow()) break;
       const batch = await spec.fetch(pos, maxItems - written);
       const recs = batch.rows.map((row) => ({ row, rec: spec.record(row) }));
+      // Records [0, done) are committed. With attachments they are taken a
+      // group at a time, and the budget / cancellation is checked between
+      // groups, so a stop lands on a record boundary inside the page.
+      let done = recs.length;
+      let failure: unknown;
       if (args.attachments === true) {
-        await mapWithConcurrency(
-          recs.filter(({ row }) => spec.hasAttachments(row) && spec.itemPath(row) !== undefined),
-          ATTACHMENT_CONCURRENCY,
-          async ({ row, rec }) => {
-            rec.attachments = await saveAttachments(att, spec.itemPath(row)!, String(rec.id));
-          },
-        );
+        const wanted = ({ row }: (typeof recs)[number]) => spec.hasAttachments(row) && spec.itemPath(row) !== undefined;
+        done = 0;
+        try {
+          while (done < recs.length) {
+            if (done > 0 && stopNow()) break;
+            const end = groupEnd(recs, done, wanted);
+            const group = recs.slice(done, end).filter(wanted);
+            const fetched = await mapWithConcurrency(group, ATTACHMENT_CONCURRENCY, ({ row, rec }) =>
+              fetchAttachments(att, spec.itemPath(row)!, String(rec.id)),
+            );
+            for (let i = 0; i < group.length; i++) group[i].rec.attachments = await commitAttachments(att, fetched[i]);
+            done = end;
+          }
+        } catch (e) {
+          // A credential failure stops the run; cancellation just ends it. Either
+          // way the unfinished group is left for the resumed call.
+          if (!(e instanceof ExportStopped)) failure = e;
+          else if (att.failure !== undefined) failure = att.failure;
+        }
       }
-      for (const { row, rec } of recs) {
+      for (const { row, rec } of recs.slice(0, done)) {
         chunks.push(args.format === 'markdown' ? spec.markdown(rec) : jsonlLine(rec));
         extendSpan(totals, spec.timeOf(row));
         written++;
       }
-      pos = batch.pos;
-      hasMore = batch.hasMore;
-      if (batch.stop) errors.push(batch.stop);
+      if (done === recs.length) {
+        pos = batch.pos;
+        hasMore = batch.hasMore;
+        if (batch.stop) errors.push(batch.stop);
+      } else {
+        pos = batch.posAfter(done);
+        hasMore = true;
+      }
       await reportProgress(written, maxItems, `${written} ${spec.countKey} exported`);
+      if (failure !== undefined) throw failure;
+      if (done < recs.length) break;
     }
   } catch (e) {
     if (written === 0 && att.files.length === 0) {
@@ -826,7 +920,10 @@ async function finishPart<R, A extends CommonArgs>(
     generated_at: header.generated_at,
     args: spec.args,
     note: EXPORT_NOTE,
+    // On disk the manifest is rewritten in place, so it lists every part's
+    // files; a blob zip's manifest lists the files in that zip.
     files: [
+      ...earlierManifestFiles(sink, [partRec.name, ...run.attachmentFiles.map((f) => f.name)]),
       { name: partRec.name, bytes: partRec.bytes, records: run.written },
       ...run.attachmentFiles.map((f) => ({ name: f.name, bytes: f.bytes })),
     ],
@@ -837,6 +934,29 @@ async function finishPart<R, A extends CommonArgs>(
   };
   await sink.addFile('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`, 'application/json', { overwrite: true });
   return sink.finish();
+}
+
+/**
+ * The files earlier parts listed in a disk export's manifest.json (best
+ * effort: a missing or unreadable manifest lists none). Names in `current`
+ * are left out — this part lists them itself.
+ */
+function earlierManifestFiles(sink: ExportSink, current: string[]): { name: string; bytes: number; records?: number }[] {
+  if (sink.mode !== 'disk' || !sink.dir || sink.part <= 1) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(sink.dir, 'manifest.json'), 'utf8'));
+  } catch {
+    return [];
+  }
+  const files = (parsed as { files?: unknown } | null)?.files;
+  if (!Array.isArray(files)) return [];
+  const skip = new Set(current);
+  return files.flatMap((f: unknown) => {
+    const { name, bytes, records } = (f ?? {}) as { name?: unknown; bytes?: unknown; records?: unknown };
+    if (typeof name !== 'string' || typeof bytes !== 'number' || skip.has(name) || name === 'manifest.json') return [];
+    return [{ name, bytes, ...(typeof records === 'number' ? { records } : {}) }];
+  });
 }
 
 /** The mailbox address for the header — best effort; an export never fails over it. */
@@ -954,6 +1074,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
       const folder = args.search !== undefined ? 'all' : (args.folder ?? 'inbox');
       const path = folder === 'all' ? '/me/messages' : `/me/mailfolders/${encodeURIComponent(folder)}/messages`;
 
+      const perPage = args.attachments === true ? Math.min(pageSize, ATTACHMENT_PAGE_SIZE) : pageSize;
       const pos: Position =
         resumed?.pos ?? (args.search !== undefined ? { offset: 0 } : { from: encodeFrom({ t: since ?? EPOCH, ids: [] }) });
       if ('from' in pos) decodeFrom(pos.from); // validate a cursor's position before any work
@@ -961,7 +1082,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
       const fetch = async (p: Position, remaining: number): Promise<Batch<ExportMessage>> => {
         if ('from' in p) {
           const at = decodeFrom(p.from);
-          const limit = Math.min(remaining, pageSize);
+          const limit = Math.min(remaining, perPage);
           const { bound, top } = fromQuery(at, limit);
           const filter = until ? `${bound} and ReceivedDateTime lt ${until}` : bound;
           const query: QueryParams = { $top: top, $select: MAIL_SELECT, $filter: filter, $orderby: 'ReceivedDateTime asc' };
@@ -970,7 +1091,13 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
           const page = fromPage(rows, at, limit, Boolean(data?.['@odata.nextLink']));
           if (page.rows.length === 0 && page.has_more) {
             // Over a page of messages share one timestamp; keyset cannot step past them.
-            return { rows: [], pos: p, hasMore: false, stop: `Stopped: more than ${MAX_TOP} messages share the timestamp ${at.t}.` };
+            return {
+              rows: [],
+              pos: p,
+              hasMore: false,
+              stop: `Stopped: more than ${MAX_TOP} messages share the timestamp ${at.t}.`,
+              posAfter: () => p,
+            };
           }
           if (page.has_more && page.next_from === p.from) {
             // No row carried a usable ReceivedDateTime, so the position did not
@@ -980,9 +1107,17 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
               pos: p,
               hasMore: false,
               stop: `Stopped: paging could not advance past ${at.t} (messages without a received time).`,
+              posAfter: () => p,
             };
           }
-          return { rows: page.rows, pos: { from: page.next_from }, hasMore: page.has_more };
+          return {
+            rows: page.rows,
+            pos: { from: page.next_from },
+            hasMore: page.has_more,
+            // The first n rows are fresh and ascending, so the keyset position after them is computed the same way.
+            posAfter: (n) =>
+              n >= page.rows.length ? { from: page.next_from } : { from: fromPage(page.rows.slice(0, n), at, n, true).next_from },
+          };
         }
         return linkBatch<ExportMessage>(
           p,
@@ -992,7 +1127,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
               () =>
                 client.get<Page<ExportMessage>>(path, {
                   text: true,
-                  query: { $search: `"${args.search!.replace(/"/g, '')}"`, $top: pageSize, $select: MAIL_SELECT },
+                  query: { $search: `"${args.search!.replace(/"/g, '')}"`, $top: perPage, $select: MAIL_SELECT },
                 }),
               sleep,
             ),
@@ -1086,7 +1221,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
       if (!resumed) {
         // Fix the zone for the whole export, so every part's times read the same way.
         const zone = await mailboxTimeZone(client);
-        if (zone) args = { ...args, time_zone: zone };
+        if (zone && zone.length <= 100 && TIME_ZONE_NAME.test(zone)) args = { ...args, time_zone: zone };
       }
       const prefer = args.time_zone ? `outlook.timezone="${args.time_zone}"` : undefined;
       const path =
@@ -1109,7 +1244,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
                     endDateTime: until,
                     $select: EVENT_SELECT,
                     $orderby: 'Start/DateTime',
-                    $top: pageSize,
+                    $top: args.attachments === true ? Math.min(pageSize, ATTACHMENT_PAGE_SIZE) : pageSize,
                   },
                 }),
               sleep,

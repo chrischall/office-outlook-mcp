@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
 import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
+import { McpToolError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerExportTools, type ExportToolOptions } from '../src/tools/export.js';
 import type { OutlookClient } from '../src/client.js';
@@ -80,6 +82,8 @@ function stub() {
 
 type Result = {
   mode: 'disk' | 'blob';
+  has_more?: boolean;
+  cursor?: string;
   location: string;
   files: { path?: string; name?: string; bytes: number }[];
   counts: Record<string, number>;
@@ -184,5 +188,158 @@ describe('export attachments', () => {
     );
     expect(out.mode).toBe('blob');
     expect(out.files.filter((f) => f.name?.startsWith('attachments/'))).toHaveLength(3);
+
+    // Open the uploaded zip: the attachment bytes are there, already-compressed
+    // media is STOREd and the JSONL part is DEFLATEd.
+    const put = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0][1];
+    const zip = unzip(Buffer.from(put.body as ArrayBuffer));
+    const pdfs = [...zip.entries()].filter(([n]) => n.endsWith('.pdf'));
+    expect(pdfs).toHaveLength(2);
+    expect(pdfs.map(([, e]) => e.method)).toEqual([0, 0]);
+    expect(pdfs.map(([, e]) => e.data.toString('utf8')).sort()).toEqual(['%PDF-fake', 'second']);
+    expect(zip.get('part-0001.jsonl')?.method).toBe(8);
+    expect(zip.get('part-0001.jsonl')?.data.toString('utf8')).toContain('"id":"id-1"');
+  });
+});
+
+/** Read a zip's entries from its central directory (STORE and DEFLATE only). */
+function unzip(buf: Buffer): Map<string, { method: number; data: Buffer }> {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const count = buf.readUInt16LE(eocd + 10);
+  let at = buf.readUInt32LE(eocd + 16);
+  const out = new Map<string, { method: number; data: Buffer }>();
+  for (let i = 0; i < count; i++) {
+    const method = buf.readUInt16LE(at + 10);
+    const size = buf.readUInt32LE(at + 20);
+    const nameLen = buf.readUInt16LE(at + 28);
+    const extraLen = buf.readUInt16LE(at + 30);
+    const commentLen = buf.readUInt16LE(at + 32);
+    const local = buf.readUInt32LE(at + 42);
+    const name = buf.toString('utf8', at + 46, at + 46 + nameLen);
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const raw = buf.subarray(start, start + size);
+    out.set(name, { method, data: method === 8 ? inflateRawSync(raw) : Buffer.from(raw) });
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+/**
+ * A mailbox that honours the keyset `$filter` and `$top`, where every message
+ * has one file attachment. `onDownload` runs before each attachment download.
+ */
+function keysetStub(n: number, onDownload: (id: string) => void = () => {}) {
+  const mailbox = Array.from({ length: n }, (_, i) => ({
+    Id: `m-${i + 1}`,
+    Subject: `Subject ${i + 1}`,
+    ReceivedDateTime: new Date(Date.UTC(2026, 0, 1, 0, i + 1)).toISOString(),
+    HasAttachments: true,
+    Body: { ContentType: 'Text', Content: 'body' },
+  }));
+  const att = (id: string) => ({
+    '@odata.type': FILE,
+    Id: `att-${id}`,
+    Name: `${id}.txt`,
+    ContentType: 'text/plain',
+    Size: 8,
+    ContentBytes: b64(`bytes-${id}`),
+  });
+  const calls: { path: string; opts?: Opts }[] = [];
+  const get = vi.fn(async (path: string, opts?: Opts) => {
+    calls.push({ path, opts });
+    if (path === '/me') return { EmailAddress: 'me@example.test' };
+    const one = /^\/me\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(path);
+    if (one) {
+      const id = decodeURIComponent(one[1]);
+      onDownload(id);
+      return att(id);
+    }
+    const list = /^\/me\/messages\/([^/]+)\/attachments$/.exec(path);
+    if (list) {
+      const { ContentBytes: _b, ...meta } = att(decodeURIComponent(list[1]));
+      return { value: [meta] };
+    }
+    const ge = /ReceivedDateTime ge (\S+)/.exec(String(opts?.query?.$filter ?? ''))?.[1];
+    const top = Number(opts?.query?.$top ?? 1000);
+    const rows = mailbox.filter((m) => !ge || Date.parse(m.ReceivedDateTime) >= Date.parse(ge));
+    return { value: rows.slice(0, top), ...(rows.length > top ? { '@odata.nextLink': 'https://next.test' } : {}) };
+  });
+  const downloads = () => calls.filter((c) => /\/attachments\/[^/]+$/.test(c.path)).map((c) => c.path);
+  return { client: { get, getAbsolute: vi.fn(), write: vi.fn() } as unknown as OutlookClient, calls, downloads };
+}
+
+const partRecords = (out: Result, part: number) =>
+  records(out.files.find((f) => f.path?.endsWith(`part-000${part}.jsonl`))!.path!);
+
+describe('export attachments: stopping mid-page', () => {
+  it('stops on a credential failure during an attachment download and loses nothing on resume', async () => {
+    let refuse = true;
+    const s = keysetStub(3, (id) => {
+      if (id === 'm-2' && refuse) {
+        throw new McpToolError('Outlook rejected the access token (401).', { status: 401, kind: 'credential_rejected' });
+      }
+    });
+    const first = parseToolResult<Result>(await call('outlook_export_messages', s.client, { attachments: true }, { pageSize: 1 }));
+    expect(first.has_more).toBe(true);
+    expect(first.cursor).toBeTruthy();
+    expect(first.errors?.join(' ')).toMatch(/credential/i);
+    // m-1 is kept; m-2 (whose attachment hit the 401) is NOT written with a skipped attachment.
+    expect(first.counts).toEqual({ messages: 1, attachments: 1, attachments_skipped: 0 });
+    expect(partRecords(first, 1).map((r) => r.id)).toEqual(['m-1']);
+    // The refused credential is not retried for every remaining attachment.
+    expect(s.downloads().filter((p) => p.includes('m-2'))).toHaveLength(1);
+    expect(s.downloads().some((p) => p.includes('m-3'))).toBe(false);
+
+    refuse = false;
+    const second = parseToolResult<Result>(
+      await call('outlook_export_messages', s.client, { cursor: first.cursor }, { pageSize: 1 }),
+    );
+    expect(second.has_more).toBe(false);
+    expect(second.counts).toEqual({ messages: 3, attachments: 3, attachments_skipped: 0 });
+    const resumed = partRecords(second, 2);
+    expect(resumed.map((r) => r.id)).toEqual(['m-2', 'm-3']);
+    const [a] = resumed[0].attachments as Entry[];
+    expect(a.skipped).toBeUndefined();
+    expect(readFileSync(join(second.location, a.path!), 'utf8')).toBe('bytes-m-2');
+
+    // On disk the manifest is cumulative: every part's files, not just the latest part's.
+    const manifest = JSON.parse(readFileSync(join(second.location, 'manifest.json'), 'utf8'));
+    const names = manifest.files.map((f: { name: string }) => f.name);
+    expect(names).toEqual(expect.arrayContaining(['part-0001.jsonl', 'part-0002.jsonl']));
+    expect(names.filter((n: string) => n.startsWith('attachments/'))).toHaveLength(3);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('stops at budget_seconds inside a page of attachments, at a record boundary, and resumes there', async () => {
+    let now = 0;
+    // Each attachment download takes 20 s of the (fake) clock.
+    const s = keysetStub(10, () => {
+      now += 20_000;
+    });
+    const first = parseToolResult<Result>(
+      await call('outlook_export_messages', s.client, { attachments: true, budget_seconds: 30 }, { clock: () => now }),
+    );
+    expect(first.has_more).toBe(true);
+    expect(first.counts.messages).toBeGreaterThan(0);
+    expect(first.counts.messages).toBeLessThan(10);
+    expect(first.counts.attachments_skipped).toBe(0);
+    // Work stopped soon after the budget: not every attachment in the page was fetched.
+    expect(s.downloads().length).toBe(first.counts.messages);
+    expect(s.downloads().length).toBeLessThanOrEqual(4);
+    // With attachments on, a page asks for few rows, so one page cannot run unbounded.
+    const listing = s.calls.find((c) => c.opts?.query?.$filter !== undefined)!;
+    expect(Number(listing.opts!.query!.$top)).toBeLessThanOrEqual(50);
+
+    let out = first;
+    const ids = partRecords(first, 1).map((r) => r.id);
+    for (let part = 2; out.has_more && part < 9; part++) {
+      out = parseToolResult<Result>(
+        await call('outlook_export_messages', s.client, { cursor: out.cursor, budget_seconds: 30 }, { clock: () => now }),
+      );
+      ids.push(...partRecords(out, part).map((r) => r.id));
+    }
+    expect(out.has_more).toBe(false);
+    expect(ids).toEqual(Array.from({ length: 10 }, (_, i) => `m-${i + 1}`));
+    expect(out.counts).toEqual({ messages: 10, attachments: 10, attachments_skipped: 0 });
   });
 });
