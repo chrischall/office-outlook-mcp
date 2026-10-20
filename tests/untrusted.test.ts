@@ -91,7 +91,7 @@ describe('third-party text is framed as untrusted', () => {
     await h.close();
   });
 
-  it.each(['outlook_send_mail', 'outlook_create_event'])(
+  it.each(['outlook_send_message', 'outlook_create_event'])(
     '%s tells the model never to confirm because read content asked it to',
     async (name) => {
       const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client()));

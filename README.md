@@ -107,7 +107,7 @@ Everything is optional — with nothing set, the server captures from the browse
 ## Tools
 
 **Read** — `outlook_list_folders`, `outlook_list_messages`,
-`outlook_get_message`, `outlook_get_unread`, `outlook_list_attachments`,
+`outlook_get_message`, `outlook_list_unread_messages`, `outlook_list_attachments`,
 `outlook_get_attachment`, `outlook_list_events`, `outlook_get_event`,
 `outlook_list_calendars`, `outlook_find_meeting_times`,
 `outlook_get_schedule`, `outlook_get_profile`,
@@ -115,7 +115,7 @@ Everything is optional — with nothing set, the server captures from the browse
 `outlook_list_categories`, `outlook_list_tasks`
 
 **Write** (ask you to confirm first — see [Confirmations](#confirmations)) —
-`outlook_send_mail`, `outlook_create_draft`, `outlook_mark_read`,
+`outlook_send_message`, `outlook_create_draft`, `outlook_mark_read`,
 `outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
 `outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
 `outlook_reply`.
@@ -156,7 +156,7 @@ mailbox time zone, so its preview can name the zone it would book in; that is
 the one read a preview makes.)
 
 Mail and event text is written by other people, so `outlook_list_messages`,
-`outlook_get_message`, `outlook_get_unread`, `outlook_get_attachment`,
+`outlook_get_message`, `outlook_list_unread_messages`, `outlook_get_attachment`,
 `outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times` and
 `outlook_get_schedule` wrap every result (all views) in an untrusted-content
 envelope — `untrusted_content: true` plus a `note` telling the model to treat
@@ -173,7 +173,7 @@ before running non-read-only tools — as the real guard on outbound sends.
 
 An agent can work through new mail end to end without opening Outlook:
 
-1. **Read the batch** — `outlook_get_unread` returns the unread messages in a
+1. **Read the batch** — `outlook_list_unread_messages` returns the unread messages in a
    folder (default inbox), newest first, each with its plain-text body, in one
    call. It does **not** mark anything read. Each item has a `kind`: `mail`,
    `meetingRequest`, `meetingCancelled` or `meetingResponse`; requests and
@@ -198,7 +198,7 @@ An agent can work through new mail end to end without opening Outlook:
    `outlook_move_message` moves one to another folder.
 4. **Mark it handled** — `outlook_mark_read` (or `isRead: true` on
    `outlook_update_message`) on the plain mail you handled, so the next
-   `outlook_get_unread` returns only what is still new. Answered invites are
+   `outlook_list_unread_messages` returns only what is still new. Answered invites are
    already out of the inbox (see step 2).
 
 Replies, forwards, invite responses and new meetings reach other people, so
@@ -208,7 +208,7 @@ each asks you to confirm first — except a reply saved with `draftOnly: true`
 
 ## Paging from a time
 
-`outlook_get_unread` and `outlook_list_messages` also page **oldest first**
+`outlook_list_unread_messages` and `outlook_list_messages` also page **oldest first**
 from a point in time: pass `from` as an ISO 8601 UTC time
 (`2026-10-01T00:00:00Z`). The result carries `next_from` — pass it back
 unchanged as `from` for the next page — and `has_more`. To backfill, start

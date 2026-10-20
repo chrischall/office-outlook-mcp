@@ -41,6 +41,15 @@ describe('tool annotations', () => {
     expect(Object.keys(registeredAnnotations())).toHaveLength(28);
   });
 
+  it('follows the list/get naming rule: the renamed tools have no aliases', () => {
+    // list_* returns a collection, get_* one item or a single view. The old
+    // names were removed outright (breaking), so neither may still register.
+    const names = Object.keys(registeredAnnotations());
+    expect(names).toContain('outlook_list_unread_messages');
+    expect(names).toContain('outlook_send_message');
+    expect(names.filter((n) => ['outlook_get' + '_unread', 'outlook_send' + '_mail'].includes(n))).toEqual([]);
+  });
+
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {
     const missing = Object.entries(registeredAnnotations())
       .filter(([, a]) => typeof a?.readOnlyHint !== 'boolean' || typeof a?.openWorldHint !== 'boolean')
@@ -73,7 +82,7 @@ describe('tool annotations', () => {
     const ann = registeredAnnotations();
     const destructive = (name: string) => ann[name]?.destructiveHint;
     // Reach another person: mail, invitations and updated invitations cannot be unsent.
-    expect(destructive('outlook_send_mail')).toBe(true);
+    expect(destructive('outlook_send_message')).toBe(true);
     expect(destructive('outlook_create_event')).toBe(true);
     expect(destructive('outlook_update_event')).toBe(true);
     expect(destructive('outlook_reply')).toBe(true);

@@ -6,7 +6,7 @@ import { registerMailTools } from '../src/tools/mail.js';
 import type { OutlookClient } from '../src/client.js';
 
 /**
- * `outlook_get_unread` — the one-call triage batch: the unread list, each
+ * `outlook_list_unread_messages` — the one-call triage batch: the unread list, each
  * message's text body, and for an invite the event it refers to. Fixtures are
  * synthetic (example.test addresses, placeholder text).
  */
@@ -82,14 +82,14 @@ function stub(
 
 async function run(client: OutlookClient, args: Record<string, unknown> = {}) {
   const h = await createTestHarness((s: McpServer) => registerMailTools(s, client));
-  const res = await h.callTool('outlook_get_unread', args);
+  const res = await h.callTool('outlook_list_unread_messages', args);
   await h.close();
   return res;
 }
 
 type Out = { count: number; items: Record<string, unknown>[]; nextLink?: string; untrusted_content?: boolean };
 
-describe('outlook_get_unread', () => {
+describe('outlook_list_unread_messages', () => {
   it('lists unread inbox mail newest first in one call, selecting the meeting type', async () => {
     const s = stub([]);
     await run(s.client);
@@ -293,7 +293,7 @@ describe('outlook_get_unread', () => {
     await run(s.client);
     expect(s.write).not.toHaveBeenCalled();
     const h = await createTestHarness((srv: McpServer) => registerMailTools(srv, s.client));
-    const tool = (await h.listTools()).find((t) => t.name === 'outlook_get_unread');
+    const tool = (await h.listTools()).find((t) => t.name === 'outlook_list_unread_messages');
     await h.close();
     expect(tool?.description).toMatch(/outlook_mark_read/);
     expect(tool?.description).toMatch(/untrusted/i);
@@ -304,7 +304,7 @@ describe('outlook_get_unread', () => {
     // id, so marking its old id read 404s.
     const s = stub([]);
     const h = await createTestHarness((srv: McpServer) => registerMailTools(srv, s.client));
-    const tool = (await h.listTools()).find((t) => t.name === 'outlook_get_unread');
+    const tool = (await h.listTools()).find((t) => t.name === 'outlook_list_unread_messages');
     await h.close();
     expect(tool?.description).toMatch(/Deleted Items/);
     expect(tool?.description).not.toMatch(/outlook_mark_read on the ids you handled/);

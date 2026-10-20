@@ -8,7 +8,7 @@ import type { OutlookClient } from '../src/client.js';
 
 /**
  * `from` / `next_from`: oldest-first keyset paging from a UTC time, shared by
- * outlook_get_unread and outlook_list_messages. Fixtures are synthetic.
+ * outlook_list_unread_messages and outlook_list_messages. Fixtures are synthetic.
  */
 
 const wire = (path: string, opts?: { query?: Record<string, unknown> }) =>
@@ -96,7 +96,7 @@ describe('next_from token', () => {
 });
 
 describe.each([
-  ['outlook_get_unread', { includeBody: false }],
+  ['outlook_list_unread_messages', { includeBody: false }],
   ['outlook_list_messages', {}],
 ])('%s with from', (tool, base) => {
   it('queries ReceivedDateTime ge <t> first, ascending, with $top = limit', async () => {
@@ -189,16 +189,16 @@ describe.each([
   });
 });
 
-describe('outlook_get_unread with from', () => {
+describe('outlook_list_unread_messages with from', () => {
   it('keeps the unread filter after the date bound', async () => {
     const s = stub([]);
-    await call(s.client, 'outlook_get_unread', { from: '2026-10-01T00:00:00Z', includeBody: false });
+    await call(s.client, 'outlook_list_unread_messages', { from: '2026-10-01T00:00:00Z', includeBody: false });
     expect(s.paths[0]).toContain('$filter=ReceivedDateTime ge 2026-10-01T00:00:00Z and IsRead eq false');
   });
 
   it('rejects from with sinceHours', async () => {
     const s = stub([]);
-    const res = await call(s.client, 'outlook_get_unread', { from: '2026-10-01T00:00:00Z', sinceHours: 24 });
+    const res = await call(s.client, 'outlook_list_unread_messages', { from: '2026-10-01T00:00:00Z', sinceHours: 24 });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toMatch(/sinceHours/);
     expect(s.paths).toHaveLength(0);
@@ -207,7 +207,7 @@ describe('outlook_get_unread with from', () => {
   it('fetches bodies only for the kept rows', async () => {
     const s = stub([msg('b', '2026-10-01T02:00:00Z'), msg('c', '2026-10-01T03:00:00Z')]);
     const out = parseToolResult<Out>(
-      await call(s.client, 'outlook_get_unread', { from: token('2026-10-01T02:00:00Z', ['b']) }),
+      await call(s.client, 'outlook_list_unread_messages', { from: token('2026-10-01T02:00:00Z', ['b']) }),
     );
     expect(ids(out)).toEqual(['c']);
     expect(out.items[0].body).toBe('body');
@@ -260,10 +260,10 @@ describe('outlook_list_messages with from', () => {
   });
 });
 
-describe('outlook_get_unread without from', () => {
+describe('outlook_list_unread_messages without from', () => {
   it('stays newest first with nextLink and no next_from', async () => {
     const s = stub([msg('a', '2026-10-01T01:00:00Z')], 'https://outlook.office.com/api/v2.0/next');
-    const out = parseToolResult<Out>(await call(s.client, 'outlook_get_unread', { includeBody: false }));
+    const out = parseToolResult<Out>(await call(s.client, 'outlook_list_unread_messages', { includeBody: false }));
     expect(s.paths[0]).toContain('$orderby=ReceivedDateTime desc');
     expect(out.nextLink).toBe('https://outlook.office.com/api/v2.0/next');
     expect(out).not.toHaveProperty('next_from');
