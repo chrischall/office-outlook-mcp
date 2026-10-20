@@ -69,7 +69,7 @@ afterEach(() => {
 
 const gated = [
   [
-    'outlook_send_mail',
+    'outlook_send_message',
     { to: ['a@example.com'], cc: ['c@example.com'], subject: 's', body: 'b' },
     'POST',
     '/me/sendmail',
@@ -154,11 +154,11 @@ describe('every write tool is gated by a confirm token', () => {
     const { client, writes } = stubClient();
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const args = { to: ['a@example.com'], subject: 's', body: 'b' };
-    const first = parseToolResult<PhaseOne>(await h.callTool('outlook_send_mail', args));
-    await h.callTool('outlook_send_mail', { ...args, confirmToken: first.confirmToken });
+    const first = parseToolResult<PhaseOne>(await h.callTool('outlook_send_message', args));
+    await h.callTool('outlook_send_message', { ...args, confirmToken: first.confirmToken });
     expect(writes()).toHaveLength(1);
 
-    const replay = await h.callTool('outlook_send_mail', { ...args, confirmToken: first.confirmToken });
+    const replay = await h.callTool('outlook_send_message', { ...args, confirmToken: first.confirmToken });
     expect(replay.isError).toBe(true);
     expect(parseToolResult<{ error?: string }>(replay).error).toBe('TOKEN_REUSED');
     expect(writes()).toHaveLength(1);
@@ -169,9 +169,9 @@ describe('every write tool is gated by a confirm token', () => {
     const { client, writes } = stubClient();
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const first = parseToolResult<PhaseOne>(
-      await h.callTool('outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }),
+      await h.callTool('outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' }),
     );
-    const changed = await h.callTool('outlook_send_mail', {
+    const changed = await h.callTool('outlook_send_message', {
       to: ['x@evil.test'],
       subject: 's',
       body: 'b',
@@ -216,7 +216,7 @@ describe('every write tool is gated by a confirm token', () => {
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client), {
       elicitation: async () => ({ action: 'decline' }),
     });
-    await h.callTool('outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    await h.callTool('outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' });
     expect(writes()).toHaveLength(0);
     await h.close();
   });
@@ -226,7 +226,7 @@ describe('every write tool is gated by a confirm token', () => {
     const { client, writes } = stubClient();
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const res = parseToolResult<{ reason?: string; confirmToken?: string }>(
-      await h.callTool('outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }),
+      await h.callTool('outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' }),
     );
     expect(res.reason).toBe('confirmation-unsupported');
     expect(res.confirmToken).toBeUndefined();

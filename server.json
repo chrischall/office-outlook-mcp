@@ -73,7 +73,7 @@
         },
         {
           "name": "MCP_CONFIRM_MODE",
-          "description": "What outlook_send_mail, outlook_reply, outlook_respond_to_invite and the other write tools do on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop): \"ask-user\" (default: the first call returns a preview and a confirmToken, and the model must get your approval in chat before using it), \"auto\" (the model may use the token after reviewing the preview itself) or \"refuse\". An unrecognised value is treated as refuse.",
+          "description": "What outlook_send_message, outlook_reply, outlook_respond_to_invite and the other write tools do on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop): \"ask-user\" (default: the first call returns a preview and a confirmToken, and the model must get your approval in chat before using it), \"auto\" (the model may use the token after reviewing the preview itself) or \"refuse\". An unrecognised value is treated as refuse.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

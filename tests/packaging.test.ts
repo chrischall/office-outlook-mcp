@@ -314,7 +314,7 @@ describe('README tool docs', () => {
     // (answer an invite, reply, schedule a follow-up), file it, mark it read.
     const loop = named(section('Triage loop'));
     for (const tool of [
-      'outlook_get_unread',
+      'outlook_list_unread_messages',
       'outlook_respond_to_invite',
       'outlook_reply',
       'outlook_find_meeting_times',

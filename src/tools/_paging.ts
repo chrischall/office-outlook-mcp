@@ -57,7 +57,7 @@ export function plainCollection(data: {
  * A position is the newest `ReceivedDateTime` already returned plus the Ids
  * returned AT that instant, so a page boundary that splits messages sharing a
  * timestamp neither skips nor repeats one. Keyset rather than `$skip` on
- * purpose: a caller that marks mail read between get_unread pages removes rows
+ * purpose: a caller that marks mail read between list_unread_messages pages removes rows
  * from the filtered set, which shifts every later `$skip` offset and silently
  * loses messages. A time bound does not move.
  */

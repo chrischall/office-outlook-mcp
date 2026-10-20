@@ -108,7 +108,7 @@
     "confirm_mode": {
       "type": "string",
       "title": "Write confirmation mode (optional)",
-      "description": "Optional. What outlook_send_mail, outlook_reply, outlook_respond_to_invite and the other write tools do on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop): \"ask-user\" (default: the first call returns a preview and a confirmToken, and the model must get your approval in chat before using it), \"auto\" (the model may use the token after reviewing the preview itself) or \"refuse\". An unrecognised value is treated as refuse. Leave blank for the default.",
+      "description": "Optional. What outlook_send_message, outlook_reply, outlook_respond_to_invite and the other write tools do on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop): \"ask-user\" (default: the first call returns a preview and a confirmToken, and the model must get your approval in chat before using it), \"auto\" (the model may use the token after reviewing the preview itself) or \"refuse\". An unrecognised value is treated as refuse. Leave blank for the default.",
       "required": false
     },
     "confirm_elicitation": {
@@ -145,7 +145,7 @@
       "description": "Get one message including its body"
     },
     {
-      "name": "outlook_get_unread",
+      "name": "outlook_list_unread_messages",
       "description": "Triage batch: unread messages with text bodies and invite events in one call"
     },
     {
@@ -201,7 +201,7 @@
       "description": "List Outlook tasks"
     },
     {
-      "name": "outlook_send_mail",
+      "name": "outlook_send_message",
       "description": "Send an email (asks you to confirm first)"
     },
     {

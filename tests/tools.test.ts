@@ -259,7 +259,7 @@ describe('read tools', () => {
 
 describe('write tools are confirmation-gated', () => {
   const writeTools = [
-    ['outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }],
+    ['outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' }],
     ['outlook_mark_read', { id: 'm1', isRead: true }],
     ['outlook_move_message', { id: 'm1', destination: 'archive' }],
     ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00' }],
@@ -335,7 +335,7 @@ describe('write tools are confirmation-gated', () => {
   });
 
   it.each([
-    ['outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' }, /Sent Items/],
+    ['outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' }, /Sent Items/],
     ['outlook_create_event', { subject: 's', start: '2026-09-22T15:00:00', end: '2026-09-22T16:00:00', timeZone: 'UTC' }, /calendar/],
   ] as const)('%s reports a timed-out write as unknown, not as a failure to retry', async (name, args, where) => {
     // The confirm token is spent by then, and Outlook often accepted the
@@ -379,7 +379,7 @@ describe('write tools are confirmation-gated', () => {
     });
     const { client } = stubClient({ write });
     const h = await harnessFor(registerWriteTools, client);
-    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    const raw = await confirmedCall(h, 'outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' });
     expect(raw.isError).toBeFalsy();
     const res = parseToolResult<{ status?: string; warning?: string }>(raw);
     expect(res.status).toBe('unknown');
@@ -394,7 +394,7 @@ describe('write tools are confirmation-gated', () => {
     });
     const { client } = stubClient({ write });
     const h = await harnessFor(registerWriteTools, client);
-    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    const raw = await confirmedCall(h, 'outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' });
     expect(raw.isError).toBe(true);
     await h.close();
   });
@@ -405,12 +405,12 @@ describe('write tools are confirmation-gated', () => {
     });
     const { client } = stubClient({ write });
     const h = await harnessFor(registerWriteTools, client);
-    const raw = await confirmedCall(h, 'outlook_send_mail', { to: ['a@example.com'], subject: 's', body: 'b' });
+    const raw = await confirmedCall(h, 'outlook_send_message', { to: ['a@example.com'], subject: 's', body: 'b' });
     expect(raw.isError).toBe(true);
     await h.close();
   });
 
-  it.each(['outlook_send_mail', 'outlook_create_event'])('%s describes the timeout case', async (name) => {
+  it.each(['outlook_send_message', 'outlook_create_event'])('%s describes the timeout case', async (name) => {
     const { client } = stubClient();
     const h = await harnessFor(registerWriteTools, client);
     const tool = (await h.listTools()).find((t) => t.name === name);
@@ -435,7 +435,7 @@ describe('write tools are confirmation-gated', () => {
     const { client, calls } = stubClient();
     const h = await harnessFor(registerWriteTools, client);
     const res = parseToolResult<{ sent?: boolean; recipients?: string }>(
-      await confirmedCall(h, 'outlook_send_mail', {
+      await confirmedCall(h, 'outlook_send_message', {
         to: ['a@example.com'],
         cc: ['b@example.com'],
         subject: 'Subj',

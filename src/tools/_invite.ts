@@ -2,7 +2,7 @@ import type { OutlookEvent } from '../view.js';
 
 /**
  * The calendar item an invite message refers to, shared by the triage read
- * (outlook_get_unread) and the response write (outlook_respond_to_invite) so
+ * (outlook_list_unread_messages) and the response write (outlook_respond_to_invite) so
  * the two cannot drift.
  */
 

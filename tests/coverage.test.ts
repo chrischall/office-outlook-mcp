@@ -446,7 +446,7 @@ describe('confirmed write paths', () => {
     const client = stub();
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
-    await confirmedCall(h, 'outlook_send_mail', {
+    await confirmedCall(h, 'outlook_send_message', {
       to: ['a@example.com'], subject: 's', body: 'b', saveToSentItems: false,
     });
     expect((client.write as ReturnType<typeof vi.fn>).mock.calls[0][2]).toMatchObject({
@@ -460,7 +460,7 @@ describe('confirmed write paths', () => {
     const { registerWriteTools } = await import('../src/tools/writes.js');
     const h = await createTestHarness((s: McpServer) => registerWriteTools(s, client));
     const out = parseToolResult<{ preview: { action: string } }>(
-      await h.callTool('outlook_send_mail', { subject: 's', body: 'b' }),
+      await h.callTool('outlook_send_message', { subject: 's', body: 'b' }),
     );
     expect(out.preview.action).toContain('(no recipients)');
     await h.close();

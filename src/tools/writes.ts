@@ -286,7 +286,7 @@ export const createEventInput = z.object({
 
 export function registerWriteTools(server: McpServer, client: OutlookClient): void {
   server.registerTool(
-    'outlook_send_mail',
+    'outlook_send_message',
     {
       description:
         'Send an email from the signed-in mailbox.' +
@@ -320,7 +320,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       };
       const recipients = [...(to ?? []), ...(cc ?? []), ...(bcc ?? [])].join(', ');
       const gate = await confirmWrite(ctx, {
-        tool: 'outlook_send_mail',
+        tool: 'outlook_send_message',
         action: 'mail.send',
         message: 'Review and confirm this email before it is sent:',
         summary: `Send mail "${subject}" to ${recipients || '(no recipients)'}`,
@@ -420,7 +420,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_update_message',
     {
       description:
-        'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_get_unread → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Duplicate ids are collapsed, so each message is written once. Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest, but a rejected or missing credential fails the whole call. Only your mailbox changes — nobody is notified.' +
+        'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_list_unread_messages → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Duplicate ids are collapsed, so each message is written once. Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest, but a rejected or missing credential fails the whole call. Only your mailbox changes — nobody is notified.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -812,7 +812,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_respond_to_invite',
     {
       description:
-        'Accept, tentatively accept or decline a meeting invitation. Pass the invite\'s `messageId` (from outlook_get_unread, which marks it kind "meetingRequest") or the event\'s `eventId` — exactly one. The organizer is sent your response unless `sendResponse: false`, in which case only your calendar changes and no confirmation is asked. Cancelled meetings and meetings you organize are refused. The result is verified by re-reading the event\'s response status; a declined meeting may leave your calendar entirely. Outlook then moves the invite message itself to Deleted Items (under a new id), so an answered invite needs no outlook_mark_read.' +
+        'Accept, tentatively accept or decline a meeting invitation. Pass the invite\'s `messageId` (from outlook_list_unread_messages, which marks it kind "meetingRequest") or the event\'s `eventId` — exactly one. The organizer is sent your response unless `sendResponse: false`, in which case only your calendar changes and no confirmation is asked. Cancelled meetings and meetings you organize are refused. The result is verified by re-reading the event\'s response status; a declined meeting may leave your calendar entirely. Outlook then moves the invite message itself to Deleted Items (under a new id), so an answered invite needs no outlook_mark_read.' +
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' ' +
@@ -861,7 +861,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
             );
           }
           throw new McpToolError('That message is not a meeting invite.', {
-            hint: 'Only messages outlook_get_unread marks kind "meetingRequest" carry an event to answer.',
+            hint: 'Only messages outlook_list_unread_messages marks kind "meetingRequest" carry an event to answer.',
           });
         }
       } else {
@@ -1097,7 +1097,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       }
       if (mode !== 'forward' && to?.length) {
         throw new McpToolError('`to` applies only to a forward.', {
-          hint: 'A reply goes where Outlook computes; use mode "forward" to send it somewhere else, or outlook_send_mail.',
+          hint: 'A reply goes where Outlook computes; use mode "forward" to send it somewhere else, or outlook_send_message.',
         });
       }
       const { send, draft, prefix } = REPLY_MODES[mode];
