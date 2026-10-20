@@ -324,14 +324,16 @@ describe('outlook_export_messages — disk mode', () => {
     // Schema-valid in every field, so only the allowedRoots re-check of `dir` can stop it.
     const s = stub();
     const cursor = encodeExportCursor({
-      exportId: 'x',
+      kind: 'mail',
+      exportId: 'abcdefgh12345678',
       part: 2,
       dir: '/etc',
       args: { format: 'jsonl' },
       pos: { from: encodeFrom({ t: '2026-01-01T00:00:00Z', ids: [] }) },
-      totals: { messages: 1 },
+      totals: { items: 1 },
     });
     const res = await call(s.client, { cursor });
+    expect(text(res)).toMatch(/outside|allowed|confine|root/i);
     expect(res.isError).toBe(true);
     expect(text(res)).not.toContain('SECRET-BODY-TEXT');
     expect(existsSync('/etc/part-0002.jsonl')).toBe(false);
@@ -392,7 +394,10 @@ describe('outlook_export_messages — registration', () => {
     const tool = (await h.listTools()).find((t) => t.name === 'outlook_export_messages');
     await h.close();
     let cfg: { annotations?: unknown; inputSchema?: { shape: Record<string, unknown> } } = {};
-    registerExportTools({ registerTool: (_n: string, c: typeof cfg) => (cfg = c) } as never, stub().client);
+    registerExportTools(
+      { registerTool: (n: string, c: typeof cfg) => n === 'outlook_export_messages' && (cfg = c) } as never,
+      stub().client,
+    );
     expect(cfg.annotations).toEqual({ readOnlyHint: true, openWorldHint: true });
     // Mail only: calendar export is its own tool, so there is no `kind` switch.
     expect(Object.keys(cfg.inputSchema!.shape)).toContain('cursor');

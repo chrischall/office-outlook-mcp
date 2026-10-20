@@ -65,11 +65,36 @@ describe('third-party text is framed as untrusted', () => {
     await h.close();
   });
 
-  it('outlook_export_messages says in its description that exported text is untrusted', async () => {
-    const h = await createTestHarness((s: McpServer) => registerExportTools(s, client()));
-    const tool = (await h.listTools()).find((t) => t.name === 'outlook_export_messages');
-    expect(tool?.description).toMatch(/untrusted/i);
-    await h.close();
+  it.each(['outlook_export_messages', 'outlook_export_events'])(
+    '%s says in its description that exported text is untrusted',
+    async (name) => {
+      const h = await createTestHarness((s: McpServer) => registerExportTools(s, client()));
+      const tool = (await h.listTools()).find((t) => t.name === name);
+      expect(tool?.description).toMatch(/untrusted/i);
+      await h.close();
+    },
+  );
+
+  it('outlook_export_events wraps its manifest in the envelope and returns none of the third-party text', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'outlook-untrusted-export-'));
+    try {
+      const h = await createTestHarness((s: McpServer) =>
+        registerExportTools(s, client(), { env: { OUTLOOK_OUTPUT_DIR: dir }, sleep: async () => {} }),
+      );
+      const res = await h.callTool('outlook_export_events', {
+        since: '2026-09-20T00:00:00Z',
+        until: '2026-09-27T00:00:00Z',
+        max_items: 1,
+      });
+      await h.close();
+      const text = (res.content as { type: string; text: string }[])[0].text;
+      const parsed = parseToolResult<Record<string, unknown>>(res);
+      expect(parsed.untrusted_content).toBe(true);
+      expect(String(parsed.note)).toMatch(/not instructions/i);
+      expect(text).not.toContain(INJECTION);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('outlook_export_messages wraps its manifest in the envelope and returns none of the third-party text', async () => {

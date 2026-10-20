@@ -97,7 +97,7 @@
     "outlook_output_dir": {
       "type": "string",
       "title": "Export folder (optional)",
-      "description": "Absolute directory where outlook_export_messages writes its files. Defaults to ~/Downloads/office-outlook-mcp. When set, a per-call dest must be inside it.",
+      "description": "Absolute directory where outlook_export_messages and outlook_export_events write their files. Defaults to ~/Downloads/office-outlook-mcp. When set, a per-call dest must be inside it.",
       "required": false
     },
     "fetchproxy_ws_host": {
@@ -249,7 +249,11 @@
     },
     {
       "name": "outlook_export_messages",
-      "description": "Bulk-export mail to JSONL or Markdown files (local paths, or a download link when hosted); returns only a manifest"
+      "description": "Bulk-export mail (and its attachments) to JSONL or Markdown files (local paths, or a download link when hosted); returns only a manifest"
+    },
+    {
+      "name": "outlook_export_events",
+      "description": "Bulk-export calendar events in a date window (recurrences expanded, attachments optional) to JSONL or Markdown files; returns only a manifest"
     },
     {
       "name": "outlook_healthcheck",

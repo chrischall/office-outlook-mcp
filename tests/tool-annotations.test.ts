@@ -40,7 +40,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(29);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(30);
   });
 
   it('follows the list/get naming rule: the renamed tools have no aliases', () => {

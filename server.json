@@ -61,7 +61,7 @@
         },
         {
           "name": "OUTLOOK_OUTPUT_DIR",
-          "description": "Absolute directory where outlook_export_messages writes its files. Defaults to ~/Downloads/office-outlook-mcp. When set, a per-call dest must be inside it.",
+          "description": "Absolute directory where outlook_export_messages and outlook_export_events write their files. Defaults to ~/Downloads/office-outlook-mcp. When set, a per-call dest must be inside it.",
           "isRequired": false,
           "format": "string"
         },
