@@ -11,6 +11,7 @@ examples:
   - prompt: What's on my work calendar for the rest of this week?
     note: Recurring meetings are expanded into their individual occurrences.
   - prompt: Which of my Outlook tasks are due this week?
+    note: Lists tasks with their status and due dates, read-only; Claude picks out the ones due this week.
 #
 # Hosting note (a comment, not user-facing summary text): this MCP mints its
 # credential through the fetchproxy BROWSER BRIDGE. It is not a full-bridge
