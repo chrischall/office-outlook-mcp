@@ -226,6 +226,7 @@ describe('outlook_export_messages — disk mode', () => {
     const p3 = third.files.find((f) => f.path?.endsWith('part-0003.jsonl'))!;
     expect(lines(p3.path!).slice(1).map((r) => r.id)).toEqual(['id-7']);
     expect(readdirSync(first.location).sort()).toEqual([
+      '.mcp-export',
       'manifest.json',
       'part-0001.jsonl',
       'part-0002.jsonl',
@@ -338,6 +339,25 @@ describe('outlook_export_messages — disk mode', () => {
     expect(text(res)).not.toContain('SECRET-BODY-TEXT');
     expect(existsSync('/etc/part-0002.jsonl')).toBe(false);
     expect(s.calls.filter((c) => c.path !== '/me')).toHaveLength(0);
+  });
+
+  it('refuses a cursor that names a real export directory under a different exportId', async () => {
+    // The marker rule: a resume must match the .mcp-export marker's exportId.
+    const s = stub();
+    const first = parseToolResult<Result>(await call(s.client, { max_items: 3 }));
+    expect(first.has_more).toBe(true);
+    const cursor = encodeExportCursor({
+      kind: 'mail',
+      exportId: 'zzzzzzzz99999999',
+      part: 2,
+      dir: first.location,
+      args: { format: 'jsonl' },
+      pos: { from: encodeFrom({ t: '2026-01-01T00:00:00Z', ids: [] }) },
+      totals: { items: 3 },
+    });
+    const res = await call(s.client, { cursor });
+    expect(res.isError).toBe(true);
+    expect(existsSync(join(first.location, 'part-0002.jsonl'))).toBe(false);
   });
 
   it('pages a $search by nextLink and resumes mid-page without losing rows', async () => {

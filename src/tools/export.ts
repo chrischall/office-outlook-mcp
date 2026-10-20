@@ -45,7 +45,7 @@
  * until then), with the budget and cancellation checked between groups.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, rmdirSync } from 'node:fs';
+import { readdirSync, readFileSync, rmdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
@@ -61,6 +61,7 @@ import {
 import {
   decodeExportCursor,
   encodeExportCursor,
+  EXPORT_MARKER,
   exportPartName,
   jsonlLine,
   openExportSink,
@@ -802,9 +803,15 @@ async function runExport<R, A extends CommonArgs>(
   } catch (e) {
     if (written === 0 && att.files.length === 0) {
       // Nothing to keep: leave no empty directory behind for a fresh export.
+      // A fresh directory holds only the sink's resume marker; drop it, then
+      // the directory. Anything else in there means it is not ours to clear.
       if (sink.dir && !resumed) {
         try {
-          rmdirSync(sink.dir);
+          const entries = readdirSync(sink.dir);
+          if (entries.every((f) => f === EXPORT_MARKER)) {
+            if (entries.length) unlinkSync(join(sink.dir, EXPORT_MARKER));
+            rmdirSync(sink.dir);
+          }
         } catch {
           /* not empty or already gone — leave it */
         }
