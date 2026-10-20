@@ -40,6 +40,7 @@
         "OUTLOOK_CAPTURE_TIMEOUT": "${user_config.outlook_capture_timeout}",
         "OUTLOOK_TOKEN_CACHE": "${user_config.outlook_token_cache}",
         "OUTLOOK_TOKEN_FILE": "${user_config.outlook_token_file}",
+        "OUTLOOK_OUTPUT_DIR": "${user_config.outlook_output_dir}",
         "FETCHPROXY_WS_HOST": "${user_config.fetchproxy_ws_host}",
         "FETCHPROXY_IDENTITY_DIR": "${user_config.fetchproxy_identity_dir}",
         "MCP_CONFIRM_MODE": "${user_config.confirm_mode}",
@@ -91,6 +92,12 @@
       "type": "string",
       "title": "Token cache file (advanced)",
       "description": "Path to the cached token file. Defaults to ~/.office-outlook-mcp/token.json.",
+      "required": false
+    },
+    "outlook_output_dir": {
+      "type": "string",
+      "title": "Export folder (optional)",
+      "description": "Absolute directory where outlook_export_messages writes its files. Defaults to ~/Downloads/office-outlook-mcp. When set, a per-call dest must be inside it.",
       "required": false
     },
     "fetchproxy_ws_host": {
@@ -239,6 +246,10 @@
     {
       "name": "outlook_reply",
       "description": "Reply, reply-all or forward a message, or save it as a draft (asks you to confirm first when sending)"
+    },
+    {
+      "name": "outlook_export_messages",
+      "description": "Bulk-export mail to JSONL or Markdown files (local paths, or a download link when hosted); returns only a manifest"
     },
     {
       "name": "outlook_healthcheck",

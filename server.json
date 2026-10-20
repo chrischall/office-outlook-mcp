@@ -60,6 +60,12 @@
           "format": "string"
         },
         {
+          "name": "OUTLOOK_OUTPUT_DIR",
+          "description": "Absolute directory where outlook_export_messages writes its files. Defaults to ~/Downloads/office-outlook-mcp. When set, a per-call dest must be inside it.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
           "name": "FETCHPROXY_WS_HOST",
           "description": "Bind interface for the fetchproxy concentrator, a literal IP only (default 127.0.0.1). Keep on loopback; it exists for hosted deployments that run each MCP in its own network namespace.",
           "isRequired": false,

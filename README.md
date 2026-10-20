@@ -103,6 +103,7 @@ Everything is optional — with nothing set, the server captures from the browse
 | `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Bounds the WHOLE capture, both declared hosts included. Defaults to `30`. |
 | `OUTLOOK_TOKEN_CACHE` | `false` to stop caching the token between runs. |
 | `OUTLOOK_TOKEN_FILE` | Path to the cached token. Defaults to `~/.office-outlook-mcp/token.json`. |
+| `OUTLOOK_OUTPUT_DIR` | Absolute directory `outlook_export_messages` writes into. Defaults to `~/Downloads/office-outlook-mcp`. When set, a per-call `dest` must be inside it. See [Bulk export](#bulk-export). |
 
 ## Tools
 
@@ -146,6 +147,9 @@ what that decision needs in every view: `MyResponse`, `ResponseRequested`,
 `IsOrganizer`, `IsCancelled`, `Type` (SingleInstance, Occurrence, Exception or
 SeriesMaster), `ShowAs` and `IsAllDay`, plus `SeriesMasterId` in the full view.
 
+**Export** — `outlook_export_messages` writes mail to JSONL or Markdown
+files and returns only where they are; see [Bulk export](#bulk-export).
+
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
@@ -157,8 +161,9 @@ the one read a preview makes.)
 
 Mail and event text is written by other people, so `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_unread_messages`, `outlook_get_attachment`,
-`outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times` and
-`outlook_get_schedule` wrap every result (all views) in an untrusted-content
+`outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times`,
+`outlook_get_schedule` and `outlook_export_messages` wrap every result (all
+views) in an untrusted-content
 envelope — `untrusted_content: true` plus a `note` telling the model to treat
 the text as data, never instructions (a `view: raw` record that carries its
 own `untrusted_content`/`note` key is nested under `data`, so it cannot
@@ -217,6 +222,48 @@ keep polling with the last `next_from` to pick up new mail (an empty page
 returns the same position). Messages that share a timestamp are never skipped
 or repeated across pages, and marking mail read between pages loses nothing.
 `from` cannot be combined with `nextLink`, `sinceHours`, `search` or `skip`.
+
+## Bulk export
+
+`outlook_export_messages` exports mail in bulk, thousands of messages at a
+time, and none of their text enters the conversation. The server pages the
+mailbox oldest first and writes the messages to files. The tool returns only a
+small manifest: where the files are, their sizes, the message count, the date
+span, and `has_more` plus a `cursor`. Have the agent read the files with
+shell tools (`jq`, `grep`, `rg`, `head`) rather than opening them whole.
+
+- **Arguments:** `folder` (a well-known name such as `inbox` or `sentitems`,
+  or a folder id; `all` exports the whole mailbox; default `inbox`), `since`
+  and `until` (ISO 8601), `search` (full-text, spans the mailbox), `format`
+  (`jsonl`, the default, or `markdown`), `dest`, `cursor`, `max_items`
+  (default 5000, max 50000) and `budget_seconds` (default 90, max 600).
+  `attachments: true` is accepted but not implemented yet. Records carry
+  `has_attachments`.
+- **Files:** `part-0001.jsonl` holds one JSON record per message (id,
+  conversation id, subject, from, to/cc/bcc, dates, flags, categories, web link
+  and the full plain-text body). Its first line is an `_export` header that
+  names the source, account, arguments and an untrusted-content note.
+  `format: "markdown"` writes `part-0001.md`, a readable transcript, instead.
+  `manifest.json` lists every file, the counts and any errors.
+- **Resuming:** each call stops at `max_items` or `budget_seconds`, whichever
+  comes first. While `has_more` is true, pass `cursor` back unchanged. The
+  next call continues the same export as `part-0002`, `part-0003` and so on.
+  If Outlook refuses the credential, or keeps returning 429 after three
+  Retry-After waits, the call keeps what it already wrote and returns the
+  cursor. Re-authenticate, then resume.
+
+Where the files go depends on how the server runs:
+
+| mode | when | `location` in the result |
+| --- | --- | --- |
+| `disk` | any local (stdio) install, the default | an **absolute local directory**, `<dir>/outlook-mail-<YYYYMMDD-HHmmss>/`; each file entry carries its absolute `path` |
+| `blob` | hosted on mcp-host, which sets both `MCP_BLOB_BASE_URL` and `MCP_BLOB_SIGNING_KEY` | a **signed download link** to one zip per call (`part-NNNN.zip`, which includes `manifest.json`), valid for **1 hour** (`url_expires_at`) |
+
+On disk, `<dir>` is the per-call `dest`, else `OUTLOOK_OUTPUT_DIR`, else
+`~/Downloads/office-outlook-mcp`. A `dest` must be inside `OUTLOOK_OUTPUT_DIR`
+when that is set. Otherwise it must be inside `~/Downloads`, `~/Documents` or
+`~/Desktop`. A resumed cursor's directory is checked against the same roots
+again.
 
 ## Confirmations
 

@@ -10,6 +10,7 @@ import { registerCalendarTools } from '../src/tools/calendar.js';
 import { registerDirectoryTools } from '../src/tools/directory.js';
 import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
+import { registerExportTools } from '../src/tools/export.js';
 import type { OutlookClient } from '../src/client.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -199,6 +200,7 @@ const ENV = [
   'OUTLOOK_API_BASE',
   'OUTLOOK_CAPTURE_TIMEOUT',
   'OUTLOOK_DISABLE_FETCHPROXY',
+  'OUTLOOK_OUTPUT_DIR',
   'OUTLOOK_TOKEN_CACHE',
   'OUTLOOK_TOKEN_FILE',
   'OUTLOOK_WS_PORT',
@@ -259,6 +261,7 @@ async function registeredTools(): Promise<{ name: string; description?: string }
     registerDirectoryTools(server, client);
     registerWriteTools(server, client);
     registerHealthcheckTool(server, client);
+    registerExportTools(server, client);
   });
   const tools = await h.listTools();
   await h.close();

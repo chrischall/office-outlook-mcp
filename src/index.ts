@@ -7,6 +7,7 @@ import { registerCalendarTools } from './tools/calendar.js';
 import { registerDirectoryTools } from './tools/directory.js';
 import { registerWriteTools } from './tools/writes.js';
 import { registerHealthcheckTool } from './tools/healthcheck.js';
+import { registerExportTools } from './tools/export.js';
 
 loadDotenvSafely();
 
@@ -35,6 +36,7 @@ await runMcp({
     registerCalendarTools,
     registerDirectoryTools,
     registerWriteTools,
+    registerExportTools,
     registerHealthcheckTool,
   ],
 });
