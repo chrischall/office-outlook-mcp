@@ -205,6 +205,43 @@ describe('requests', () => {
     );
   });
 
+  // fleet-audit#1405: a gateway 5xx after the request was SENT does not say the
+  // mail was not sent — Graph may have accepted it before the proxy failed — so
+  // a resend could deliver it twice. mcp-utils 3.3.1 reports it as
+  // outcome-unknown; 3.3.0 reported a hard failure that invited the resend.
+  it.each([502, 503, 504])('reports a sendmail answered %i as outcome-unknown, not a failure', async (status) => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: 'ServiceUnavailable', message: 'try later' } }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const err = await c.write('POST', '/me/sendmail', {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WriteOutcomeUnknownError);
+  });
+
+  it('still reports a sendmail Graph refused (4xx) as a plain failure', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: 'ErrorInvalidRecipients', message: 'bad address' } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const c = new OutlookClient({
+      env: env(),
+      captureToken: async () => jwt(3600),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const err = await c.write('POST', '/me/sendmail', {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(WriteOutcomeUnknownError);
+  });
+
   it('refuses to follow a pagination link off the API origin', async () => {
     const c = new OutlookClient({
       env: env(),
