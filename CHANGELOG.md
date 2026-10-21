@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.7.0...v0.7.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils to 3.3.1 so a server error after sendmail is outcome-unknown ([#91](https://github.com/chrischall/office-outlook-mcp/issues/91)) ([e31e1df](https://github.com/chrischall/office-outlook-mcp/commit/e31e1df0a8d287bfdfb7244c24fe3f44468a0736))
+
 ## [0.7.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.6.2...v0.7.0) (2026-10-20)
 
 

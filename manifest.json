@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "office-outlook-mcp",
   "display_name": "Outlook (Microsoft 365)",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Outlook / Microsoft 365 for Claude — triage unread mail, reply, answer meeting invites and schedule meetings, plus folders, calendar, contacts and tasks, with confirmation before anything is sent",
   "author": {
     "name": "Chris Chall",
