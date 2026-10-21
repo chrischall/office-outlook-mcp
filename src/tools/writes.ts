@@ -123,7 +123,7 @@ function dateTimeTimeZone(value: string, zone: string): { DateTime: string; Time
  * unknown. Kept next to {@link unknownOutcome} so the two cannot drift.
  */
 const TIMEOUT_SENTENCE =
-  'If Outlook does not answer in time (or the connection drops) the result has status "unknown": the write may well have gone through, so check before retrying — never resend blindly.';
+  'If Outlook does not answer in time, the connection drops, or a server error (5xx) comes back after the request was sent, the result has status "unknown": the write may well have gone through, so check before retrying — never resend blindly.';
 
 /**
  * Run a non-idempotent write; a timeout or dropped connection after the
