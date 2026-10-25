@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.7.1...v0.7.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **deps:** bump @fetchproxy/server from 3.6.2 to 3.6.3 in the production-dependencies group ([#94](https://github.com/chrischall/office-outlook-mcp/issues/94)) ([cafc239](https://github.com/chrischall/office-outlook-mcp/commit/cafc2395231bc8c016460b324b9f09479973647f))
+
 ## [0.7.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.7.0...v0.7.1) (2026-10-21)
 
 
