@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.0...v0.8.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **brief:** align the brief view with the fleet contract ([#101](https://github.com/chrischall/office-outlook-mcp/issues/101)) ([4a5723a](https://github.com/chrischall/office-outlook-mcp/commit/4a5723a7c03d54b3add4cfd6b3d60e4c2e8ec7b5))
+
 ## [0.8.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.7.1...v0.8.0) (2026-11-04)
 
 
