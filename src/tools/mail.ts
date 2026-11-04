@@ -411,7 +411,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           .enum(['brief'])
           .optional()
           .describe(
-            'Omit for the triage batch above. "brief": one line per message, `<sender>: <subject> — <received ISO time or "no date"> — <unread | meeting request | meeting cancelled | meeting response>`, at most 120 chars each, as `data` in the untrusted-content envelope; fetches no body and no invite; a last line `-- more` means another page exists (re-ask without "brief" for its nextLink / next_from).',
+            'Omit for the triage batch above. "brief": one line per message, `<sender>: <subject> — <received ISO time or "no date"> — <unread | meeting request | meeting cancelled | meeting response>`, at most 120 chars each, as `data` in the untrusted-content envelope; fetches no body and no invite; a line starting `-- ` is a note (`-- none` for an empty page; a title starting `-- ` or `\\` gets one leading `\\`); a last line `-- more` means another page exists (re-ask without "brief" for its nextLink / next_from).',
           ),
         folder: z.string().min(1).optional().describe('Folder id or well-known name (default "inbox")'),
         limit: z.number().int().min(1).max(50).optional().describe('Max messages (default 25, max 50)'),
