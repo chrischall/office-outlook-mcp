@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.7.1...v0.8.0) (2026-11-04)
+
+
+### Features
+
+* context-group hints, a brief view on unread mail, the calendar and tasks ([#98](https://github.com/chrischall/office-outlook-mcp/issues/98)) ([d0c606b](https://github.com/chrischall/office-outlook-mcp/commit/d0c606be26fe5e9483df12d2df5dd97bd6b4b2ea))
+
+
+### Bug Fixes
+
+* **deps:** bump @fetchproxy/server from 3.6.2 to 3.6.3 in the production-dependencies group ([#94](https://github.com/chrischall/office-outlook-mcp/issues/94)) ([cafc239](https://github.com/chrischall/office-outlook-mcp/commit/cafc2395231bc8c016460b324b9f09479973647f))
+* **deps:** bump the production-dependencies group across 1 directory with 3 updates ([#97](https://github.com/chrischall/office-outlook-mcp/issues/97)) ([29d57cd](https://github.com/chrischall/office-outlook-mcp/commit/29d57cd16bf2e6e544ac6876bb5464ce4f020978))
+* fence brief mail, calendar and task lines and note a further page ([#100](https://github.com/chrischall/office-outlook-mcp/issues/100)) ([7377f88](https://github.com/chrischall/office-outlook-mcp/commit/7377f88e15d290d42a2e38a1e922f0a9ab385ecf))
+
 ## [0.7.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.7.0...v0.7.1) (2026-10-21)
 
 
