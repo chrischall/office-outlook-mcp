@@ -84,7 +84,13 @@ outlook_get '/me/calendarview?startDateTime=2026-09-20T00:00:00Z&endDateTime=202
 When the office-outlook-mcp server is hosted on mcp-host, its tools join the
 **work** group (`_meta.mint.domain: "work"`). The group's canonical reads,
 each answered with `view: "brief"` (one line per item,
-`title — <ISO date | no date> — <status>`):
+`title — <ISO date | no date> — <status>`, returned inside the
+untrusted-content envelope as `data: string[]` because the text is other
+people's; a final `-- more` line is a note that Outlook has another page —
+re-ask without `brief` for the `nextLink`). `brief` is additive: on
+`outlook_list_events` and `outlook_list_tasks` it joins the existing
+`compact | full | raw` values, and `outlook_list_unread_messages` takes a
+new optional `view` whose only value is `brief`:
 
 - **what's new** → `outlook_list_unread_messages` (unread mail in the inbox,
   newest first; status `unread` or the meeting-message kind).

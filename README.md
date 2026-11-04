@@ -154,6 +154,17 @@ return only where they are; see [Bulk export](#bulk-export).
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
+Three reads also take `view: "brief"` — the one-line-per-item rung mcp-host's
+context groups ask in: `outlook_list_events` and `outlook_list_tasks` gain it
+beside their existing values, and `outlook_list_unread_messages` gains an
+optional `view` whose only value is `brief` (omit it for the triage batch).
+Both additions are optional, so existing calls are unchanged. A brief answer
+is the untrusted envelope described below, with the lines as `data` (one string
+per item, `title — <ISO date | no date> — <status>`, at most 120 chars); it
+fetches no message body or invite and carries no `nextLink`/`next_from`, so
+when Outlook has another page the last line is the note `-- more` (a line
+starting `-- ` is a note, not an item) — call again without `view: "brief"`
+to get the link and follow it.
 Mutating tools **write nothing** until you confirm (bar the cases above)
 — see [Confirmations](#confirmations). The preview shows exactly what would be sent
 (action, method, path and body). (`outlook_create_event` first reads the
@@ -168,7 +179,8 @@ wrap every result (all views) in an untrusted-content
 envelope — `untrusted_content: true` plus a `note` telling the model to treat
 the text as data, never instructions (a `view: raw` record that carries its
 own `untrusted_content`/`note` key is nested under `data`, so it cannot
-overwrite the envelope). `outlook_reply` returns a sent reply's subject — the
+overwrite the envelope). `outlook_list_tasks`'s brief view is wrapped the same
+way. `outlook_reply` returns a sent reply's subject — the
 original sender's text — inside the same envelope.
 On a client that cannot show a confirmation prompt, the confirmToken is still
 something the model passes back itself, so keep `MCP_CONFIRM_MODE=ask-user`

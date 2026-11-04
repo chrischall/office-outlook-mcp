@@ -411,7 +411,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
           .enum(['brief'])
           .optional()
           .describe(
-            'Omit for the triage batch above. "brief": one line per message, `<sender>: <subject> — <received ISO time or "no date"> — <unread | meeting request | meeting cancelled | meeting response>`, at most 120 chars each; fetches no body and no invite.',
+            'Omit for the triage batch above. "brief": one line per message, `<sender>: <subject> — <received ISO time or "no date"> — <unread | meeting request | meeting cancelled | meeting response>`, at most 120 chars each, as `data` in the untrusted-content envelope; fetches no body and no invite; a last line `-- more` means another page exists (re-ask without "brief" for its nextLink / next_from).',
           ),
         folder: z.string().min(1).optional().describe('Folder id or well-known name (default "inbox")'),
         limit: z.number().int().min(1).max(50).optional().describe('Max messages (default 25, max 50)'),
@@ -465,7 +465,10 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       const listed = Array.isArray(data?.value) ? data.value : [];
       const page = pos !== undefined ? fromPage(listed, pos, max, Boolean(data?.['@odata.nextLink'])) : undefined;
       const rows = page?.rows ?? listed;
-      if (view === 'brief') return briefResult(rows.map(briefUnread));
+      if (view === 'brief') {
+        const more = page !== undefined ? page.has_more : Boolean(data?.['@odata.nextLink']);
+        return briefResult(rows.map(briefUnread), more);
+      }
       const wantBody = includeBody !== false;
       const cap = maxBodyChars ?? 4000;
 

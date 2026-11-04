@@ -136,7 +136,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
           ...(zone ? { prefer: `outlook.timezone="${zone}"` } : {}),
         },
       );
-      if (view === 'brief') return briefResult((data?.value ?? []).map(briefEvent));
+      if (view === 'brief') return briefResult((data?.value ?? []).map(briefEvent), Boolean(data?.['@odata.nextLink']));
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
       return mailboxUntrusted(
