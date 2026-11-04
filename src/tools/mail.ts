@@ -9,6 +9,7 @@ import {
   McpToolError,
 } from '@chrischall/mcp-utils';
 import type { OutlookClient, QueryParams } from '../client.js';
+import { briefDate, briefLine, briefResult, spaced, workMeta } from './_hints.js';
 import {
   addr,
   addrs,
@@ -111,6 +112,15 @@ function triageKind(m: UnreadRow): TriageKind {
   if (/Request$/.test(type)) return 'meetingRequest';
   if (/Cancel/.test(type)) return 'meetingCancelled';
   return 'meetingResponse';
+}
+
+/** One unread message as a brief line: sender: subject — received — what it is. */
+function briefUnread(m: UnreadRow): string {
+  const who = m.From ?? m.Sender;
+  const sender = who?.EmailAddress?.Name || who?.EmailAddress?.Address;
+  const kind = triageKind(m);
+  const title = sender ? `${sender}: ${m.Subject ?? '(no subject)'}` : m.Subject;
+  return briefLine(title, briefDate(m.ReceivedDateTime), kind === 'mail' ? 'unread' : spaced(kind));
 }
 
 function triageEvent(e: InviteEvent): Record<string, unknown> {
@@ -266,6 +276,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         WELL_KNOWN.join(', ') +
         ') can be used directly without a lookup. Lists ONE level: top-level folders by default, or the child folders of `parent`. A folder with `Children` > 0 has subfolders — list them with `parent` set to its Id.',
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup'),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         parent: z
@@ -300,6 +311,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         ' Cannot combine with `search`, `skip` or `nextLink`.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup', { aliases: ['email', 'mail', 'inbox'] }),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         folder: z
@@ -364,6 +376,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); pass view:"raw" to get Outlook\'s untouched record. To and Cc list at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — view:"raw" returns every address.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup'),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         id: z.string().min(1).describe('Message Id from outlook_list_messages'),
@@ -392,7 +405,14 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         ' Cannot combine with `sinceHours` or `nextLink`.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('whats-new', { canonical: true, aliases: ['email', 'mail', 'inbox', 'unread', 'new mail', 'work email'] }),
       inputSchema: z.object({
+        view: z
+          .enum(['brief'])
+          .optional()
+          .describe(
+            'Omit for the triage batch above. "brief": one line per message, `<sender>: <subject> — <received ISO time or "no date"> — <unread | meeting request | meeting cancelled | meeting response>`, at most 120 chars each; fetches no body and no invite.',
+          ),
         folder: z.string().min(1).optional().describe('Folder id or well-known name (default "inbox")'),
         limit: z.number().int().min(1).max(50).optional().describe('Max messages (default 25, max 50)'),
         sinceHours: z
@@ -416,7 +436,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         nextLink: nextLinkParam,
       }),
     },
-    async ({ folder, limit, sinceHours, includeBody, maxBodyChars, from, nextLink }) => {
+    async ({ view, folder, limit, sinceHours, includeBody, maxBodyChars, from, nextLink }) => {
       const pos = fromPosition(from, { nextLink, sinceHours });
       const max = limit ?? 25;
       const keyset = pos !== undefined ? fromQuery(pos, max) : undefined;
@@ -445,6 +465,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       const listed = Array.isArray(data?.value) ? data.value : [];
       const page = pos !== undefined ? fromPage(listed, pos, max, Boolean(data?.['@odata.nextLink'])) : undefined;
       const rows = page?.rows ?? listed;
+      if (view === 'brief') return briefResult(rows.map(briefUnread));
       const wantBody = includeBody !== false;
       const cap = maxBodyChars ?? 4000;
 
@@ -514,6 +535,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       description:
         "List a message's attachments (name, size, content type). Metadata only — this deliberately does not download bytes.",
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup'),
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         nextLink: nextLinkParam,
@@ -540,6 +562,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         "Get one attachment's content (ids from outlook_list_attachments). An image comes back as image content the model can see; a text-like file (text/*, JSON, CSV, XML, .ics) is decoded to `text`, capped at 200 KB (`textTruncated` marks a cut). Any other binary (PDF, Office, archives) and anything over 5 MB is returned as metadata only — its bytes are not inlined. An attached Outlook item (a forwarded email or event) or a cloud-file link has no bytes to return; the result says which." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup'),
       inputSchema: z.object({
         messageId: z.string().min(1).describe('Message Id'),
         attachmentId: z.string().min(1).describe('Attachment Id from outlook_list_attachments'),
