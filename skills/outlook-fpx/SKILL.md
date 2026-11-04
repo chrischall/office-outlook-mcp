@@ -79,6 +79,27 @@ outlook_get '/me/calendarview?startDateTime=2026-09-20T00:00:00Z&endDateTime=202
   (assigning it wipes `PATH` mid-function) and `status` is read-only. Both are
   harmless in bash, so this only breaks for zsh users.
 
+## In context groups
+
+When the office-outlook-mcp server is hosted on mcp-host, its tools join the
+**work** group (`_meta.mint.domain: "work"`). The group's canonical reads,
+each answered with `view: "brief"` (one line per item,
+`title — <ISO date | no date> — <status>`):
+
+- **what's new** → `outlook_list_unread_messages` (unread mail in the inbox,
+  newest first; status `unread` or the meeting-message kind).
+- **what's on** → `outlook_list_events`, with the asked range filled into
+  `start`/`end` (status `cancelled` or your response).
+- **what's due** → `outlook_list_tasks` (status the task's own).
+
+None takes a subject: one signed-in mailbox, nothing to fan out over. A
+compound ask — "what's on my calendar tomorrow, and anything new at work?" —
+is one `whats-on` call over tomorrow plus one `whats-new` call, merged with
+the other work-group sources. The server reaches Outlook with a bearer token
+lifted from the browser; while that token is missing or expired and no
+signed-in Outlook tab is open, the group answers that Outlook needs your
+browser open rather than reading nothing.
+
 ## Privacy
 
 This reads the user's real mailbox. Surface only what was asked for; do not dump

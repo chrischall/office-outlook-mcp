@@ -71,6 +71,7 @@ import {
   type ExportSink,
 } from '@chrischall/mcp-utils/export';
 import { isCredentialFailure, type OutlookClient, type QueryParams } from '../client.js';
+import { workMeta } from './_hints.js';
 import { mailboxTimeZone } from '../timezone.js';
 import { addr, addrs, type OutlookEvent, type OutlookMessage, type Recipient } from '../view.js';
 import { decodeFrom, encodeFrom, fromPage, fromQuery } from './_paging.js';
@@ -1044,6 +1045,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
     {
       description: MESSAGES_DESCRIPTION,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('other'),
       inputSchema: z.object({
         folder: z
           .string()
@@ -1166,6 +1168,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
     {
       description: EVENTS_DESCRIPTION,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('other'),
       inputSchema: z.object({
         since: z
           .string()

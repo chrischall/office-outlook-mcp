@@ -15,6 +15,7 @@ import {
   WriteOutcomeUnknownError,
 } from '@chrischall/mcp-utils';
 import { isCredentialFailure, type OutlookClient } from '../client.js';
+import { workMeta } from './_hints.js';
 import { mailboxTimeZone } from '../timezone.js';
 import { cappedRecipients, MAX_RECIPIENTS } from '../view.js';
 import {
@@ -297,6 +298,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      _meta: workMeta('send', { aliases: ['email', 'send an email', 'mail'] }),
       inputSchema: z.object({
         to: recipientList,
         cc: recipientList,
@@ -348,6 +350,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       // Self-only and additive, like outlook_reply with draftOnly: nothing is
       // overwritten or sent. Not idempotent: a repeat creates a second draft.
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      _meta: workMeta('change', { aliases: ['draft', 'draft an email'] }),
       inputSchema: z.object({
         to: recipientList,
         cc: recipientList,
@@ -383,6 +386,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: workMeta('change'),
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         isRead: z.boolean().describe('true to mark read, false to mark unread'),
@@ -424,6 +428,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: workMeta('change', { aliases: ['flag', 'categorize'] }),
       inputSchema: z.object({
         messageIds: z.array(z.string().min(1)).min(1).max(50).describe('Message Ids (1 to 50)'),
         flag: z.enum(['flagged', 'complete', 'none']).optional().describe('Follow-up flag to set'),
@@ -526,6 +531,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      _meta: workMeta('change', { aliases: ['file', 'archive'] }),
       inputSchema: z.object({
         id: z.string().min(1).describe('Message Id'),
         destination: z
@@ -576,6 +582,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      _meta: workMeta('change', { aliases: ['book a meeting', 'schedule a meeting', 'invite'] }),
       inputSchema: createEventInput,
     },
     async (
@@ -648,6 +655,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      _meta: workMeta('change', { aliases: ['reschedule', 'move the meeting'] }),
       inputSchema: z.object({
         id: z.string().min(1).describe('Event Id from outlook_list_events or outlook_get_event'),
         subject: z.string().optional().describe('New title'),
@@ -820,6 +828,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: workMeta('send', { aliases: ['accept', 'decline', 'rsvp'] }),
       inputSchema: z.object({
         messageId: z
           .string()
@@ -976,6 +985,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         CONFIRM_INJECTION_RULE,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      _meta: workMeta('change', { aliases: ['cancel the meeting'] }),
       inputSchema: z.object({
         id: z
           .string()
@@ -1077,6 +1087,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      _meta: workMeta('send', { aliases: ['reply', 'reply all', 'forward'] }),
       inputSchema: z.object({
         messageId: z.string().min(1).describe('Id of the message to answer or forward'),
         mode: z.enum(['reply', 'replyAll', 'forward']).describe('reply (sender only), replyAll, or forward'),

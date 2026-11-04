@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { McpToolError, minifiedResult, resolveView, viewParam } from '@chrischall/mcp-utils';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 import type { OutlookClient } from '../client.js';
+import { briefDate, briefLine, briefResult, briefViewParam, spaced, workMeta } from './_hints.js';
 import {
   compactEvent,
   fullEvent,
@@ -78,6 +79,17 @@ interface ScheduleInformation {
   }[];
 }
 
+/** One event as a brief line: subject — start — cancelled, or your response. */
+function briefEvent(e: OutlookEvent): string {
+  const response = e.ResponseStatus?.Response;
+  const status = e.IsCancelled
+    ? 'cancelled'
+    : response && response !== 'None'
+      ? spaced(response)
+      : 'scheduled';
+  return briefLine(e.Subject, briefDate(e.Start?.DateTime), status);
+}
+
 const attendeeList = (what: string) =>
   z.array(z.string().min(3)).describe(`Email addresses of ${what}`);
 
@@ -89,8 +101,9 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         'List calendar events in a date window. This uses the calendar VIEW, which expands recurring series into their individual occurrences — the right tool for "what is on my schedule". Times are returned in `timeZone` when given. view:"raw" returns Outlook\'s records as-is and uncapped; the list carries no Attendees in any view — outlook_get_event returns them.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('whats-on', { canonical: true, when: { start: 'start', end: 'end' }, aliases: ['calendar', 'meetings', 'schedule', 'agenda', 'appointments', 'work calendar'] }),
       inputSchema: z.object({
-        view: viewParam(VIEWS),
+        view: briefViewParam(VIEWS, 'A brief status is "cancelled" or your response (accepted, organizer, not responded, …).'),
         start: z
           .string()
           .min(1)
@@ -123,6 +136,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
           ...(zone ? { prefer: `outlook.timezone="${zone}"` } : {}),
         },
       );
+      if (view === 'brief') return briefResult((data?.value ?? []).map(briefEvent));
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
       return mailboxUntrusted(
@@ -138,6 +152,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         'Get one calendar event in full, including attendees and their responses. Attendees appear in view:"full", every one of them — there is no 20-address cap as on a message\'s To/Cc; view:"raw" returns Outlook\'s untouched record, uncapped, Attendees included.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup'),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         id: z.string().min(1).describe('Event Id from outlook_list_events'),
@@ -161,6 +176,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     {
       description: 'List the calendars in the mailbox, for picking one to read or write against.',
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup'),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         nextLink: nextLinkParam,
@@ -183,6 +199,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         "Find times when people can meet — Outlook's Scheduling Assistant. Give the attendees, a search window and a duration; Outlook checks everyone's free/busy (and the signed-in user's, as organizer) and returns ranked candidate slots with each attendee's availability. By default only working hours are searched. Use this to answer \"when can X and Y meet?\"; then book with outlook_create_event — each suggestion carries `createEventArgs` (times, zone and attendees; `subject` too when given here) to pass to it as-is. `start`/`end` are local wall-clock times in `timeZone` (default: the mailbox zone), and returned slots are in that zone too. view: 'raw' returns Outlook's response as-is, without `createEventArgs`." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup', { aliases: ['free time', 'when can we meet'] }),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         attendees: attendeeList('required attendees').min(1),
@@ -302,6 +319,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
         "Get people's free/busy blocks for a time window — the grid view of Outlook's Scheduling Assistant. Returns each person's busy, tentative and out-of-office items (with subject and location where their calendar shares them). Use outlook_find_meeting_times to have Outlook pick slots instead. `start`/`end` are local wall-clock times in `timeZone` (default: the mailbox zone)." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: workMeta('lookup', { aliases: ['free busy', 'availability'] }),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         people: attendeeList('people (or rooms) to look up').min(1).max(100),
