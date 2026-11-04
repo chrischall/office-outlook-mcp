@@ -14,6 +14,7 @@
 import { z } from 'zod';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { viewParam, type View } from '@chrischall/mcp-utils';
+import { mailboxUntrusted } from './_untrusted.js';
 
 export type MintIntent =
   | 'whats-new' | 'whats-due' | 'whats-on' | 'lookup' | 'turn-on-off' | 'send' | 'change' | 'other';
@@ -39,7 +40,7 @@ export function workMeta(
 export const BRIEF_MAX = 120;
 
 const BRIEF_NOTE =
-  '"brief": one line per item, `title — <ISO date or "no date"> — <status>`, at most 120 chars each.';
+  '"brief": one line per item, `title — <ISO date or "no date"> — <status>`, at most 120 chars each, as `data` in the untrusted-content envelope; a last line `-- more` means another page exists (re-ask without "brief" for its nextLink).';
 
 /**
  * The `view` parameter of a canonical read: the tool's own rungs plus
@@ -72,9 +73,20 @@ export function briefLine(title: string | undefined, date: string, status: strin
   return `${shown.length > room ? `${shown.slice(0, Math.max(room - 1, 0))}…` : shown}${tail}`;
 }
 
-/** One line per item, as plain text — never a JSON envelope. */
-export function briefResult(lines: string[]): CallToolResult {
-  return { content: [{ type: 'text', text: lines.join('\n') }] };
+/** The note line a brief answer ends with when Outlook holds another page. */
+export const BRIEF_MORE = '-- more';
+
+/**
+ * One line per item, inside the untrusted-data envelope as `data: string[]`
+ * (mcp-host's brief-view contract): sender names, subjects and event text are
+ * written by other people, so a brief line is fenced like every other rung of
+ * these tools. A line starting with `-- ` is a NOTE, not an item: `-- more`
+ * says Outlook has another page (it gives no total, so no `N of M`) — the
+ * brief view never silently drops one. Re-ask without `view: "brief"` for the
+ * `nextLink` / `next_from` to follow it.
+ */
+export function briefResult(lines: string[], hasMore = false): CallToolResult {
+  return mailboxUntrusted(hasMore ? [...lines, BRIEF_MORE] : lines);
 }
 
 /** `NotStarted` → `not started`, `TentativelyAccepted` → `tentatively accepted`. */

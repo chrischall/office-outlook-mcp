@@ -131,7 +131,7 @@ export function registerDirectoryTools(server: McpServer, client: OutlookClient)
           },
         },
       );
-      if (view === 'brief') return briefResult((data?.value ?? []).map(briefTask));
+      if (view === 'brief') return briefResult((data?.value ?? []).map(briefTask), Boolean(data?.['@odata.nextLink']));
       return minifiedResult(collection(data, resolveView(view, VIEWS) === 'raw'));
     },
   );
