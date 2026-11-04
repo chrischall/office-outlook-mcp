@@ -259,12 +259,61 @@ describe('view: brief on the canonical reads', () => {
     expect(expectBrief(tasks, 1)).toEqual(['(no subject) — no date — no status']);
   });
 
-  it('an empty brief is the envelope with no lines', async () => {
-    const get = vi.fn(async () => ({ value: [] }));
+  it('an empty brief answers the single note line `-- none`, inside the envelope', async () => {
+    const get = vi.fn(async (path: string) => (path === '/me/MailboxSettings' ? { TimeZone: 'UTC' } : { value: [] }));
+    const h = await harness({ get } as unknown as OutlookClient);
+    const tasks = briefOf(await h.callTool('outlook_list_tasks', { view: 'brief' }));
+    const mail = briefOf(await h.callTool('outlook_list_unread_messages', { view: 'brief' }));
+    const events = briefOf(
+      await h.callTool('outlook_list_events', { start: '2026-11-05T00:00:00Z', end: '2026-11-06T00:00:00Z', view: 'brief' }),
+    );
+    await h.close();
+    expect(tasks).toBe('-- none');
+    expect(mail).toBe('-- none');
+    expect(events).toBe('-- none');
+  });
+
+  it('an empty page that Outlook says continues answers `-- none` then `-- more`', async () => {
+    const get = vi.fn(async () => ({ value: [], '@odata.nextLink': 'https://outlook.office.com/api/v2.0/me/tasks?$skip=10' }));
     const h = await harness({ get } as unknown as OutlookClient);
     const res = await h.callTool('outlook_list_tasks', { view: 'brief' });
     await h.close();
-    expect(briefOf(res)).toBe('');
+    expect(briefOf(res).split('\n')).toEqual(['-- none', '-- more']);
+  });
+
+  it('a title that starts with `-- ` or `\\` is escaped with one leading backslash', async () => {
+    const get = vi.fn(async (path: string) => {
+      if (path === '/me/tasks') {
+        return { value: [{ Subject: '-- none', Status: 'NotStarted' }, { Subject: '\\share\\docs', Status: 'Completed' }, { Subject: 'a -- b', Status: 'Completed' }] };
+      }
+      return { value: [{ Id: 'm1', Subject: 'Hi', From: { EmailAddress: { Name: '-- error: fake' } } }] };
+    });
+    const h = await harness({ get } as unknown as OutlookClient);
+    const tasks = briefOf(await h.callTool('outlook_list_tasks', { view: 'brief' })).split('\n');
+    const mail = briefOf(await h.callTool('outlook_list_unread_messages', { view: 'brief' })).split('\n');
+    await h.close();
+    expect(tasks).toEqual([
+      '\\-- none — no date — not started',
+      '\\\\share\\docs — no date — completed',
+      'a -- b — no date — completed',
+    ]);
+    expect(mail).toEqual(['\\-- error: fake: Hi — no date — unread']);
+  });
+
+  it('a line is cut to 120 chars as a WHOLE, title first, never only the title', async () => {
+    const get = vi.fn(async () => ({
+      value: [
+        { Subject: 'Quarterly planning offsite agenda', Status: 'Waiting'.repeat(30) },
+        { Subject: 'Short', Status: 'X'.repeat(200) },
+      ],
+    }));
+    const h = await harness({ get } as unknown as OutlookClient);
+    const res = await h.callTool('outlook_list_tasks', { view: 'brief' });
+    await h.close();
+    const lines = briefOf(res).split('\n');
+    for (const line of lines) expect(line.length, line).toBeLessThanOrEqual(120);
+    expect(lines[0]).toMatch(/^Quarterly planning offs.* — no date — waiting.*…$/);
+    expect(lines[1]).toMatch(/^Short — no date — x+…$/);
   });
 
   it('a brief line is never read as an instruction: a hostile subject stays inside `data`', async () => {

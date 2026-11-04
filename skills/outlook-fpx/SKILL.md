@@ -86,8 +86,10 @@ When the office-outlook-mcp server is hosted on mcp-host, its tools join the
 each answered with `view: "brief"` (one line per item,
 `title — <ISO date | no date> — <status>`, returned inside the
 untrusted-content envelope as `data: string[]` because the text is other
-people's; a final `-- more` line is a note that Outlook has another page —
-re-ask without `brief` for the `nextLink`). `brief` is additive: on
+people's; a line starting `-- ` is a note — `-- none` answers an empty page,
+and a final `-- more` says Outlook has another page, so re-ask without
+`brief` for the `nextLink`; a title starting `-- ` or `\` is escaped with one
+leading `\`). `brief` is additive: on
 `outlook_list_events` and `outlook_list_tasks` it joins the existing
 `compact | full | raw` values, and `outlook_list_unread_messages` takes a
 new optional `view` whose only value is `brief`:
