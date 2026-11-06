@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { McpToolError } from '@chrischall/mcp-utils';
 import type { OutlookClient, QueryParams } from '../client.js';
@@ -55,7 +56,7 @@ export function plainCollection(data: {
  * Oldest-first keyset paging from a UTC time (`from` in, `next_from` out).
  *
  * A position is the newest `ReceivedDateTime` already returned plus the Ids
- * returned AT that instant, so a page boundary that splits messages sharing a
+ * (as short keys, `idKey`) returned AT that instant, so a page boundary that splits messages sharing a
  * timestamp neither skips nor repeats one. Keyset rather than `$skip` on
  * purpose: a caller that marks mail read between list_unread_messages pages removes rows
  * from the filtered set, which shifts every later `$skip` offset and silently
@@ -64,8 +65,23 @@ export function plainCollection(data: {
 export interface FromPosition {
   /** ISO 8601 UTC time of the newest message returned so far. */
   t: string;
-  /** Ids of the returned messages whose ReceivedDateTime equals `t`. */
+  /** Keys ({@link idKey}) of the returned messages whose ReceivedDateTime equals `t`. */
   ids: string[];
+}
+
+/** An Id this short is kept as is (a key, or a test fixture); a real Outlook Id is ~150 characters. */
+const MAX_KEY_LENGTH = 16;
+
+/**
+ * The key a position keeps for a message Id: the Id itself when short, else
+ * 12 base64url characters (72 bits) of its SHA-256. Keys only tell apart the
+ * messages tied at ONE instant, so a collision is not a practical concern,
+ * and a burst of messages in one second costs ~15 characters each in the token
+ * rather than a whole Id. A token from an earlier release, carrying whole Ids,
+ * is re-keyed on read.
+ */
+export function idKey(id: string): string {
+  return id.length <= MAX_KEY_LENGTH ? id : createHash('sha256').update(id).digest('base64url').slice(0, 12);
 }
 
 export const fromParam = z
@@ -142,7 +158,7 @@ export function decodeFrom(from: string): FromPosition {
   ) {
     throw new McpToolError('`from` is neither an ISO 8601 time nor a next_from token.', { hint: FROM_HINT });
   }
-  return { t: utcLiteral(ms), ids: p.ids };
+  return { t: utcLiteral(ms), ids: [...new Set(p.ids.map(idKey))] };
 }
 
 /**
@@ -166,8 +182,8 @@ export function fromPage<T extends { Id?: string; ReceivedDateTime?: string }>(
   limit: number,
   apiHasMore: boolean,
 ): { rows: T[]; next_from: string; has_more: boolean } {
-  const seen = new Set(pos.ids);
-  const fresh = rows.filter((r) => r.Id === undefined || !seen.has(r.Id));
+  const seen = new Set(pos.ids.map(idKey));
+  const fresh = rows.filter((r) => r.Id === undefined || !seen.has(idKey(r.Id)));
   const kept = fresh.slice(0, limit);
   const next = nextPosition(kept, pos);
   return { rows: kept, next_from: encodeFrom(next), has_more: fresh.length > limit || apiHasMore };
@@ -175,12 +191,12 @@ export function fromPage<T extends { Id?: string; ReceivedDateTime?: string }>(
 
 function nextPosition(rows: { Id?: string; ReceivedDateTime?: string }[], pos: FromPosition): FromPosition {
   const dated = rows
-    .map((r) => ({ id: r.Id, ms: r.ReceivedDateTime ? Date.parse(r.ReceivedDateTime) : NaN }))
+    .map((r) => ({ id: r.Id === undefined ? undefined : idKey(r.Id), ms: r.ReceivedDateTime ? Date.parse(r.ReceivedDateTime) : NaN }))
     .filter((r): r is { id: string; ms: number } => r.id !== undefined && !Number.isNaN(r.ms));
   if (dated.length === 0) return pos;
   const newest = Math.max(...dated.map((r) => r.ms));
   const tied = dated.filter((r) => r.ms === newest).map((r) => r.id);
   // The position did not move: earlier ties at this instant stay excluded.
-  const carried = newest === Date.parse(pos.t) ? pos.ids.filter((id) => !tied.includes(id)) : [];
+  const carried = newest === Date.parse(pos.t) ? pos.ids.map(idKey).filter((id) => !tied.includes(id)) : [];
   return { t: utcLiteral(newest), ids: [...carried, ...tied] };
 }

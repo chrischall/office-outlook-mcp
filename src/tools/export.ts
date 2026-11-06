@@ -74,7 +74,7 @@ import { isCredentialFailure, type OutlookClient, type QueryParams } from '../cl
 import { workMeta } from './_hints.js';
 import { mailboxTimeZone } from '../timezone.js';
 import { addr, addrs, type OutlookEvent, type OutlookMessage, type Recipient } from '../view.js';
-import { decodeFrom, encodeFrom, fromPage, fromQuery } from './_paging.js';
+import { decodeFrom, encodeFrom, fromPage, fromQuery, type FromPosition } from './_paging.js';
 import { ATTACHMENT_META_SELECT, attachmentKind, base64DecodedLength, type OutlookAttachment } from './mail.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
@@ -231,13 +231,22 @@ type EventArgs = z.infer<typeof eventArgsSchema>;
 
 type CommonArgs = { format: 'jsonl' | 'markdown'; attachments?: boolean };
 
-/** Where the next part starts: a keyset position, or a nextLink page + rows consumed from it. */
+/**
+ * Where the next part starts: a keyset position, or a nextLink page + rows
+ * consumed from it. The keyset position is kept as plain `{ t, ids }` (`at`):
+ * the cursor is base64'd as a whole, so a nested `next_from` token would be
+ * encoded twice. `from` (that nested token) is still read from cursors an
+ * earlier release handed out.
+ */
 const positionSchema = z.union([
+  z.object({ at: z.object({ t: z.string().min(1), ids: z.array(z.string()) }) }),
   z.object({ from: z.string().min(1) }),
   z.object({ link: z.string().min(1).optional(), offset: z.number().int().min(0).max(MAX_TOP) }),
 ]);
 type LinkPosition = { link?: string; offset: number };
-type Position = { from: string } | LinkPosition;
+type Position = { at: FromPosition } | LinkPosition;
+/** A position as a cursor carries it, including an earlier release's nested `from` token. */
+type StoredPosition = z.infer<typeof positionSchema>;
 
 const totalsSchema = z.object({
   items: z.number().int().min(0),
@@ -707,7 +716,7 @@ interface ExportSpec<R, A extends CommonArgs> {
   /** Name of the record count in the result (`messages`, `events`). */
   countKey: string;
   args: A;
-  resumed?: { exportId: string; part: number; dir?: string; pos: Position; totals: Totals };
+  resumed?: { exportId: string; part: number; dir?: string; pos: StoredPosition; totals: Totals };
   pos: Position;
   /** Fetch the next rows (at most `limit`), from `pos`. */
   fetch: (pos: Position, limit: number) => Promise<Batch<R>>;
@@ -1084,13 +1093,22 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
       const path = folder === 'all' ? '/me/messages' : `/me/mailfolders/${encodeURIComponent(folder)}/messages`;
 
       const perPage = args.attachments === true ? Math.min(pageSize, ATTACHMENT_PAGE_SIZE) : pageSize;
+      const stored = resumed?.pos;
+      // Validate (and normalise) a cursor's keyset position before any work; read an older cursor's nested token.
       const pos: Position =
-        resumed?.pos ?? (args.search !== undefined ? { offset: 0 } : { from: encodeFrom({ t: since ?? EPOCH, ids: [] }) });
-      if ('from' in pos) decodeFrom(pos.from); // validate a cursor's position before any work
+        stored === undefined
+          ? args.search !== undefined
+            ? { offset: 0 }
+            : { at: { t: since ?? EPOCH, ids: [] } }
+          : 'from' in stored
+            ? { at: decodeFrom(stored.from) }
+            : 'at' in stored
+              ? { at: decodeFrom(encodeFrom(stored.at)) }
+              : stored;
 
       const fetch = async (p: Position, remaining: number): Promise<Batch<ExportMessage>> => {
-        if ('from' in p) {
-          const at = decodeFrom(p.from);
+        if ('at' in p) {
+          const { at } = p;
           const limit = Math.min(remaining, perPage);
           const { bound, top } = fromQuery(at, limit);
           const filter = until ? `${bound} and ReceivedDateTime lt ${until}` : bound;
@@ -1108,7 +1126,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
               posAfter: () => p,
             };
           }
-          if (page.has_more && page.next_from === p.from) {
+          if (page.has_more && page.next_from === encodeFrom(at)) {
             // No row carried a usable ReceivedDateTime, so the position did not
             // move; asking again would return (and duplicate) the same page forever.
             return {
@@ -1121,11 +1139,13 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
           }
           return {
             rows: page.rows,
-            pos: { from: page.next_from },
+            pos: { at: decodeFrom(page.next_from) },
             hasMore: page.has_more,
             // The first n rows are fresh and ascending, so the keyset position after them is computed the same way.
             posAfter: (n) =>
-              n >= page.rows.length ? { from: page.next_from } : { from: fromPage(page.rows.slice(0, n), at, n, true).next_from },
+              n >= page.rows.length
+                ? { at: decodeFrom(page.next_from) }
+                : { at: decodeFrom(fromPage(page.rows.slice(0, n), at, n, true).next_from) },
           };
         }
         return linkBatch<ExportMessage>(
@@ -1236,8 +1256,9 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
       const prefer = args.time_zone ? `outlook.timezone="${args.time_zone}"` : undefined;
       const path =
         args.calendar !== undefined ? `/me/calendars/${encodeURIComponent(args.calendar)}/calendarview` : '/me/calendarview';
-      const pos: Position = resumed?.pos ?? { offset: 0 };
-      if ('from' in pos) throw new McpToolError('`cursor` is not a valid export cursor for this tool.');
+      const stored = resumed?.pos ?? { offset: 0 };
+      if (!('offset' in stored)) throw new McpToolError('`cursor` is not a valid export cursor for this tool.');
+      const pos: Position = stored;
 
       const fetch = (p: Position, remaining: number): Promise<Batch<ExportEvent>> =>
         linkBatch<ExportEvent>(
