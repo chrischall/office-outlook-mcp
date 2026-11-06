@@ -5,7 +5,7 @@ import { isAbsolute, join } from 'node:path';
 import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
 import { McpToolError, buildQueryString } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { encodeExportCursor } from '@chrischall/mcp-utils/export';
+import { decodeExportCursor, encodeExportCursor } from '@chrischall/mcp-utils/export';
 import { registerExportTools, type ExportToolOptions } from '../src/tools/export.js';
 import { encodeFrom } from '../src/tools/_paging.js';
 import type { OutlookClient } from '../src/client.js';
@@ -235,6 +235,21 @@ describe('outlook_export_messages — disk mode', () => {
     // Cumulative totals carry across parts.
     expect(third.counts.messages).toBe(7);
     expect(third.span).toEqual({ oldest: at(1), newest: at(7) });
+  });
+
+  it('keeps the keyset position as plain JSON in the cursor, not a second base64 token', async () => {
+    const first = parseToolResult<Result>(await call(stub().client, { max_items: 3 }));
+    expect(decodeExportCursor(first.cursor!).pos).toEqual({ at: { t: at(3), ids: ['id-3'] } });
+  });
+
+  it('resumes a cursor from an earlier release whose position is a nested from token', async () => {
+    const s = stub();
+    const first = parseToolResult<Result>(await call(s.client, { max_items: 3 }));
+    const { v: _v, pos, ...rest } = decodeExportCursor(first.cursor!) as Record<string, any>;
+    const legacy = encodeExportCursor({ ...rest, pos: { from: encodeFrom(pos.at) } });
+    const second = parseToolResult<Result>(await call(s.client, { cursor: legacy, max_items: 3 }));
+    const p2 = second.files.find((f) => f.path?.endsWith('part-0002.jsonl'))!;
+    expect(lines(p2.path!).slice(1).map((r) => r.id)).toEqual(['id-4', 'id-5', 'id-6']);
   });
 
   it('stops on the time budget with has_more and a cursor', async () => {

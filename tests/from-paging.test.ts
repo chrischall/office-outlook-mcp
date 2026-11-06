@@ -270,3 +270,40 @@ describe('outlook_list_unread_messages without from', () => {
     expect(out).not.toHaveProperty('has_more');
   });
 });
+
+describe('next_from with real-length Outlook Ids', () => {
+  // Outlook message Ids run ~150 characters; a tie of many at one second must not bloat the token.
+  const longId = (n: number) => `AAMkADk${'Q'.repeat(140)}/+${String(n).padStart(4, '0')}AAA=`;
+  const T = '2026-10-01T02:00:00Z';
+  const tied = Array.from({ length: 20 }, (_, i) => msg(longId(i), T));
+
+  it('keeps a short key per tied message instead of its whole Id', async () => {
+    const s = stub(tied);
+    const out = parseToolResult<Out>(await call(s.client, 'outlook_list_messages', { from: '2026-10-01T00:00:00Z', limit: 20 }));
+    const pos = decodeFrom(out.next_from!);
+    expect(pos.ids).toHaveLength(20);
+    expect(pos.ids.every((k) => k.length <= 16)).toBe(true);
+    expect(out.next_from!.length).toBeLessThan(600);
+  });
+
+  it('still skips the tied messages on the next page', async () => {
+    const first = parseToolResult<Out>(
+      await call(stub(tied).client, 'outlook_list_messages', { from: '2026-10-01T00:00:00Z', limit: 20 }),
+    );
+    const later = msg(longId(99), T);
+    const out = parseToolResult<Out>(
+      await call(stub([...tied, later]).client, 'outlook_list_messages', { from: first.next_from, limit: 20 }),
+    );
+    expect(ids(out)).toEqual([longId(99)]);
+  });
+
+  it('reads an older token that carries whole Ids', async () => {
+    const s = stub([msg(longId(0), T), msg(longId(1), T)]);
+    const out = parseToolResult<Out>(
+      await call(s.client, 'outlook_list_messages', { from: token(T, [longId(0)]), limit: 5 }),
+    );
+    expect(ids(out)).toEqual([longId(1)]);
+    // The carried tie is re-keyed, so the token never grows back to whole Ids.
+    expect(decodeFrom(out.next_from!).ids.every((k) => k.length <= 16)).toBe(true);
+  });
+});
