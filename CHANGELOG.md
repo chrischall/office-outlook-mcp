@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.2...v0.8.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **paging:** keep next_from and export cursors short when many messages share a second ([#105](https://github.com/chrischall/office-outlook-mcp/issues/105)) ([6834acd](https://github.com/chrischall/office-outlook-mcp/commit/6834acdef8cfd2f358b71fbd1becd6106d53ba79))
+
 ## [0.8.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.1...v0.8.2) (2026-11-06)
 
 
