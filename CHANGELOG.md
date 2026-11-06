@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.1...v0.8.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **auth:** stop opening a new Outlook tab on every capture ([#103](https://github.com/chrischall/office-outlook-mcp/issues/103)) ([5c9abb4](https://github.com/chrischall/office-outlook-mcp/commit/5c9abb49b8f4e0aeaea798f040d93e5df21d495e))
+
 ## [0.8.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.0...v0.8.1) (2026-11-04)
 
 
