@@ -54,6 +54,23 @@ npm i -g @fetchproxy/cli
 The first capture prints a 6-digit pair code to approve in the ContextMint
 Bridge popup; the grant persists.
 
+### Pairing
+
+The server declares **one** host to the bridge — `outlook.cloud.microsoft`, or
+`OUTLOOK_WEB_HOST` — and the same scope on every capture, so once approved it
+neither re-pairs nor asks for wider grants. The bridge keeps one relay tab on
+that host open (it reuses yours if you already have Outlook open).
+
+Before 0.8.2 it also declared `outlook.office.com`. A signed-in tab there
+redirects to `outlook.cloud.microsoft`, so the bridge opened another background
+tab on every capture. Upgrading changes the declared domain set, so the bridge
+asks to pair **once** more.
+
+If you run the bridge in more than one browser or browser profile, each one is a
+different extension identity, and the server trusts only the one it paired
+with. Keep the bridge enabled in the browser you pair with (or re-pair
+deliberately with `FETCHPROXY_TRUST_NEW_EXTENSION=1` after switching browsers).
+
 ### Install in opencode
 
 opencode reads MCP servers from `opencode.json` (project) or
@@ -100,7 +117,8 @@ Everything is optional — with nothing set, the server captures from the browse
 | `OUTLOOK_DISABLE_FETCHPROXY` | `1` to disable browser capture, requiring `OUTLOOK_ACCESS_TOKEN`. |
 | `OUTLOOK_API_BASE` | Override the REST base URL. Defaults to `https://outlook.office.com/api/v2.0`. |
 | `OUTLOOK_WS_PORT` | fetchproxy concentrator port. Defaults to `37149`, the fleet-wide shared port. |
-| `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Bounds the WHOLE capture, both declared hosts included. Defaults to `30`. |
+| `OUTLOOK_WEB_HOST` | Which Outlook Web host your signed-in tab is on: `outlook.cloud.microsoft` (default) or `outlook.office.com` for a tenant still on the legacy app. Only this one host is declared to the bridge — see [Pairing](#pairing). |
+| `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Defaults to `30`. |
 | `OUTLOOK_TOKEN_CACHE` | `false` to stop caching the token between runs. |
 | `OUTLOOK_TOKEN_FILE` | Path to the cached token. Defaults to `~/.office-outlook-mcp/token.json`. |
 | `OUTLOOK_OUTPUT_DIR` | Absolute directory `outlook_export_messages` and `outlook_export_events` write into. Defaults to `~/Downloads/office-outlook-mcp`. When set, a per-call `dest` must be inside it. See [Bulk export](#bulk-export). |

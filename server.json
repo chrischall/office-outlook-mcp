@@ -42,6 +42,12 @@
           "format": "string"
         },
         {
+          "name": "OUTLOOK_WEB_HOST",
+          "description": "Which Outlook Web host your signed-in tab is on: outlook.cloud.microsoft (default) or outlook.office.com for a tenant still on the legacy app. Only this one host is declared to the browser bridge.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
           "name": "OUTLOOK_CAPTURE_TIMEOUT",
           "description": "Seconds to wait for the Outlook tab to make a request we can read a token from. Defaults to 30.",
           "isRequired": false,

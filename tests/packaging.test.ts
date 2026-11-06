@@ -203,6 +203,7 @@ const ENV = [
   'OUTLOOK_OUTPUT_DIR',
   'OUTLOOK_TOKEN_CACHE',
   'OUTLOOK_TOKEN_FILE',
+  'OUTLOOK_WEB_HOST',
   'OUTLOOK_WS_PORT',
 ];
 
@@ -285,18 +286,20 @@ describe('manifest tool roster', () => {
 
 describe('host lists', () => {
   it('lets a hosted registration reach both Outlook Web hosts', async () => {
-    const { CAPTURE_HOSTS } = await import('../src/auth-fetchproxy.js');
+    const { OUTLOOK_WEB_HOSTS } = await import('../src/auth-fetchproxy.js');
     const mint = readFileSync(join(root, 'mint.yaml'), 'utf8');
     const allow = mint.split(/^egress:/m)[1].match(/^\s+- (\S+)$/gm)!.map((l) => l.trim().slice(2));
-    for (const host of CAPTURE_HOSTS) expect(allow).toContain(host);
+    for (const host of OUTLOOK_WEB_HOSTS) expect(allow).toContain(host);
   });
 
-  it('scopes the fpx skill profile to exactly the capture hosts', async () => {
-    const { CAPTURE_HOSTS } = await import('../src/auth-fetchproxy.js');
+  it('scopes the fpx skill profile to the one default capture host', async () => {
+    // One domain, as the server declares: a second makes the bridge open a
+    // relay tab on it after every hello, and outlook.office.com redirects.
+    const { captureHost } = await import('../src/auth-fetchproxy.js');
     const skill = readFileSync(join(root, 'skills/outlook-fpx/SKILL.md'), 'utf8');
     const profileAdd = skill.match(/fpx profile add outlook(?:[^\n]*\\\n)*[^\n]*/)![0];
     const domains = [...profileAdd.matchAll(/--domain (\S+)/g)].map((m) => m[1]);
-    expect(domains.sort()).toEqual([...CAPTURE_HOSTS].sort());
+    expect(domains).toEqual([captureHost({})]);
   });
 });
 
