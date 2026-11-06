@@ -36,9 +36,11 @@ again".
 
 ### Token capture
 
-`captureRequestHeader` on `authorization@outlook.cloud.microsoft`, racing the
-same declaration on `authorization@outlook.office.com` for tenants still on the
-legacy host. Capture resolves on the **next** matching request, so the tab must
+`captureRequestHeader` on `authorization@outlook.cloud.microsoft` — or on
+`outlook.office.com` with `OUTLOOK_WEB_HOST`, for tenants still on the legacy
+host. Only that one host is declared: the bridge opens a relay tab for every
+declared domain without one, and a signed-in `outlook.office.com` tab redirects
+to `outlook.cloud.microsoft`, so declaring both opened a new tab per capture. Capture resolves on the **next** matching request, so the tab must
 make one inside the window — a reload guarantees it.
 
 ---

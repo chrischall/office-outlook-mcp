@@ -37,6 +37,7 @@
         "OUTLOOK_DISABLE_FETCHPROXY": "${user_config.outlook_disable_fetchproxy}",
         "OUTLOOK_API_BASE": "${user_config.outlook_api_base}",
         "OUTLOOK_WS_PORT": "${user_config.outlook_ws_port}",
+        "OUTLOOK_WEB_HOST": "${user_config.outlook_web_host}",
         "OUTLOOK_CAPTURE_TIMEOUT": "${user_config.outlook_capture_timeout}",
         "OUTLOOK_TOKEN_CACHE": "${user_config.outlook_token_cache}",
         "OUTLOOK_TOKEN_FILE": "${user_config.outlook_token_file}",
@@ -74,6 +75,12 @@
       "type": "string",
       "title": "fetchproxy port (advanced)",
       "description": "fetchproxy concentrator port used for token capture. Defaults to 37149, the fleet-wide shared port.",
+      "required": false
+    },
+    "outlook_web_host": {
+      "type": "string",
+      "title": "Outlook Web host (advanced)",
+      "description": "Which Outlook Web host your signed-in tab is on: outlook.cloud.microsoft (default) or outlook.office.com for a tenant still on the legacy app. Only this one host is declared to the browser bridge.",
       "required": false
     },
     "outlook_capture_timeout": {

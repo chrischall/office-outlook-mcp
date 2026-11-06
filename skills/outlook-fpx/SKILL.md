@@ -13,13 +13,18 @@ token** (~25h lifetime) — every actual request is a plain server-side `curl`.
 
 ```sh
 npm i -g @fetchproxy/cli                      # provides `fpx`
-fpx profile add outlook --domain outlook.cloud.microsoft \
-                        --domain outlook.office.com
+fpx profile add outlook --domain outlook.cloud.microsoft
 fpx profile declare outlook \
   --capture-header authorization@outlook.cloud.microsoft \
-  --capture-header authorization@outlook.office.com \
   --allow-download
 ```
+
+Declare **one** host, the one your signed-in Outlook tab is on. A tenant still
+on the legacy app uses `outlook.office.com` in both lines and exports
+`OUTLOOK_CAPTURE_HOST=outlook.office.com`. Don't declare both: the bridge opens a
+background tab for every declared domain with no tab open, and because a
+signed-in `outlook.office.com` tab redirects to `outlook.cloud.microsoft`, it
+opens another one on every capture.
 
 Declare **all** scopes before the first pairing — widening them later forces the
 user to re-approve. The first `fpx` call prints a 6-digit pair code to approve in
