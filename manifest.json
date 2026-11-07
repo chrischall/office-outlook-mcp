@@ -168,7 +168,7 @@
     },
     {
       "name": "outlook_get_attachment",
-      "description": "Get one attachment: images as image content, text-like files decoded, other binaries as metadata"
+      "description": "Get one attachment: images inline, text-like files decoded, other files as a download link (hosted) or saved file (local)"
     },
     {
       "name": "outlook_list_events",
