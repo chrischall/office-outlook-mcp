@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.4](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.3...v0.8.4) (2026-11-07)
+
+
+### Bug Fixes
+
+* **attachments:** hand over PDFs, Office files and large attachments instead of metadata only ([#107](https://github.com/chrischall/office-outlook-mcp/issues/107)) ([5b0ed71](https://github.com/chrischall/office-outlook-mcp/commit/5b0ed71d19ba5534127e7afdb542e692885acf2c))
+* **deps:** upgrade @chrischall/mcp-utils to 3.7.2 so uploads carry only the file's bytes ([#109](https://github.com/chrischall/office-outlook-mcp/issues/109)) ([a2c0c85](https://github.com/chrischall/office-outlook-mcp/commit/a2c0c85aba64057d1eae69a4a8f97b9a914da539))
+
 ## [0.8.3](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.2...v0.8.3) (2026-11-06)
 
 
