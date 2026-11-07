@@ -121,7 +121,7 @@ Everything is optional — with nothing set, the server captures from the browse
 | `OUTLOOK_CAPTURE_TIMEOUT` | Seconds to wait for the tab to make a readable request. Defaults to `30`. |
 | `OUTLOOK_TOKEN_CACHE` | `false` to stop caching the token between runs. |
 | `OUTLOOK_TOKEN_FILE` | Path to the cached token. Defaults to `~/.office-outlook-mcp/token.json`. |
-| `OUTLOOK_OUTPUT_DIR` | Absolute directory `outlook_export_messages` and `outlook_export_events` write into. Defaults to `~/Downloads/office-outlook-mcp`. When set, a per-call `dest` must be inside it. See [Bulk export](#bulk-export). |
+| `OUTLOOK_OUTPUT_DIR` | Absolute directory `outlook_export_messages` and `outlook_export_events` write into, and where a local install saves the files `outlook_get_attachment` cannot return inline. Defaults to `~/Downloads/office-outlook-mcp` (for attachments, only when `~/Downloads` exists). When set, a per-call `dest` must be inside it. See [Bulk export](#bulk-export). |
 
 ## Tools
 
@@ -354,6 +354,34 @@ a fresh preview.
   as a four-hour error on an Eastern mailbox.
 - Contact phone fields are `MobilePhone1`, not Graph's `MobilePhone`. The v2.0
   Contact type rejects the Graph name with a 400.
+- `outlook_get_attachment` decodes a text-like file up to 5 MB and returns an
+  image up to 5 MB inline. Anything else, up to 50 MB, comes back as the file:
+  a signed download link valid for 1 hour when hosted (mcp-host sets
+  `MCP_BLOB_BASE_URL` and `MCP_BLOB_SIGNING_KEY`), or a new `0600` file under
+  `OUTLOOK_OUTPUT_DIR` (else `~/Downloads/office-outlook-mcp`) on a local
+  install. A hosted server never writes to its own disk; nobody in your
+  session could open the path.
+
+## Upgrading
+
+### To the next release
+
+`outlook_get_attachment` used to return PDFs, Office files and anything over
+5 MB as metadata only, so the file was unreachable. It now hands the bytes over.
+The existing fields (`name`, `contentType`, `size`, `kind`, `inlined`, `text`,
+`textTruncated`, `hint`) are unchanged. New fields appear when bytes are
+delivered:
+
+- `via`: `image`, `resource`, `link` or `disk`.
+- `downloadUrl` and `downloadExpiresAt`: hosted. Treat the link as a secret;
+  anyone holding it can download until it expires.
+- `path`: local, where the file was saved.
+- `deliveryNote`: why that route was chosen, when it was not the obvious one.
+
+A local install with a `~/Downloads` folder (or `OUTLOOK_OUTPUT_DIR` set) now
+**saves** such attachments to disk instead of returning metadata only. Without
+either, the old metadata-only answer remains. The `hint` text on that path now
+names `OUTLOOK_OUTPUT_DIR`.
 
 ## The lightweight alternative
 

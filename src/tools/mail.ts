@@ -1,13 +1,19 @@
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
-  imageResult,
+  expandPath,
   mapWithConcurrency,
+  readEnvVar,
+  type EnvSource,
   minifiedResult,
   resolveView,
   viewParam,
   McpToolError,
 } from '@chrischall/mcp-utils';
+import { blobStoreFromEnv, deliverFile, isHostedEnv, type BlobStore } from '@chrischall/mcp-utils/export';
 import type { OutlookClient, QueryParams } from '../client.js';
 import { briefDate, briefLine, briefResult, spaced, workMeta } from './_hints.js';
 import {
@@ -159,6 +165,45 @@ export const ATTACHMENT_META_SELECT = 'Id,Name,ContentType,Size,IsInline';
 /** Above this an attachment is never inlined, whatever its type (base64 inflates it ~4/3 again). */
 const MAX_INLINE_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Largest attachment whose bytes are downloaded to hand over as a link or a
+ * saved file (the export tool's per-file cap too). Outlook returns them as one
+ * base64 JSON string, so this bounds the memory one call can take.
+ */
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+
+const SERVER_NAME = 'office-outlook-mcp';
+const OUTPUT_DIR_ENV = 'OUTLOOK_OUTPUT_DIR';
+
+/**
+ * Where an attachment's bytes can go besides inline: the blob store (hosted —
+ * a signed link), else a download directory (a local install only:
+ * `OUTLOOK_OUTPUT_DIR`, else `~/Downloads/office-outlook-mcp` when
+ * `~/Downloads` exists). A hosted runner's disk is never offered: nobody in
+ * the caller's session can open a path on it.
+ */
+interface DeliveryRoutes {
+  hosted: boolean;
+  store?: BlobStore;
+  diskDir?: string;
+}
+
+function deliveryRoutes(env: EnvSource): DeliveryRoutes {
+  const store = blobStoreFromEnv(env);
+  if (isHostedEnv(env)) return { hosted: true, ...(store ? { store } : {}) };
+  const configured = readEnvVar(OUTPUT_DIR_ENV, { env });
+  if (configured !== undefined) return { hosted: false, diskDir: expandPath(configured) };
+  const downloads = join(readEnvVar('HOME', { env }) ?? homedir(), 'Downloads');
+  return { hosted: false, ...(existsSync(downloads) ? { diskDir: join(downloads, SERVER_NAME) } : {}) };
+}
+
+/** Why an attachment's bytes have no way back to the caller here. */
+function noRouteHint(routes: DeliveryRoutes, why: string): string {
+  return routes.hosted
+    ? `${why} This hosted server has no blob store configured (MCP_BLOB_BASE_URL / MCP_BLOB_SIGNING_KEY), so it cannot hand over a download link. Open it in Outlook to read it.`
+    : `${why} Set ${OUTPUT_DIR_ENV} (or create ~/Downloads) to have it saved to disk, or open it in Outlook.`;
+}
+
 /** Decoded text is cut here; a longer file is marked `textTruncated`. */
 const MAX_TEXT_BYTES = 200 * 1024;
 
@@ -267,7 +312,13 @@ async function listFrom(
   return mailboxUntrusted({ ...body, next_from: page.next_from, has_more: page.has_more });
 }
 
-export function registerMailTools(server: McpServer, client: OutlookClient): void {
+export interface MailToolOptions {
+  /** Environment for `OUTLOOK_OUTPUT_DIR`, `HOME` and `MCP_BLOB_*` / `MCP_DATA_DIR`. Default `process.env`. */
+  env?: EnvSource;
+}
+
+export function registerMailTools(server: McpServer, client: OutlookClient, opts: MailToolOptions = {}): void {
+  const env = opts.env ?? process.env;
   server.registerTool(
     'outlook_list_folders',
     {
@@ -562,7 +613,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
     'outlook_get_attachment',
     {
       description:
-        "Get one attachment's content (ids from outlook_list_attachments). An image comes back as image content the model can see; a text-like file (text/*, JSON, CSV, XML, .ics) is decoded to `text`, capped at 200 KB (`textTruncated` marks a cut). Any other binary (PDF, Office, archives) and anything over 5 MB is returned as metadata only — its bytes are not inlined. An attached Outlook item (a forwarded email or event) or a cloud-file link has no bytes to return; the result says which." +
+        "Get one attachment's content (ids from outlook_list_attachments). A text-like file (text/*, JSON, CSV, XML, .ics) up to 5 MB is decoded to `text`, capped at 200 KB (`textTruncated` marks a cut). An image up to 5 MB comes back as image content the model can see. Anything else (PDF, Office, archives) or larger, up to 50 MB, is handed over as the file itself: on a hosted server a signed, expiring download link (`downloadUrl`, valid until `downloadExpiresAt`) — give it to the user; on a local install a fresh file (`path`) under OUTLOOK_OUTPUT_DIR, else ~/Downloads/office-outlook-mcp. `via` says which (image, resource, link or disk). Where neither route exists the result is metadata only and `hint` says why. An attached Outlook item (a forwarded email or event) or a cloud-file link has no bytes to return; the result says which." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: workMeta('lookup'),
@@ -600,12 +651,23 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
         return mailboxUntrusted(out);
       }
       const image = isImage(contentType);
-      if (!image && !isText(contentType, name)) {
-        out.hint = 'Binary content is not inlined: only images and text-like files are returned. Open it in Outlook to read it.';
-        return mailboxUntrusted(out);
+      const text = !image && isText(contentType, name);
+      const size = meta.Size ?? 0;
+      const routes = deliveryRoutes(env);
+      const canHandOver = routes.store !== undefined || routes.diskDir !== undefined;
+      // Decide before downloading, so a 25 MB PDF is never fetched only to be dropped.
+      if (!canHandOver) {
+        if (!image && !text) {
+          out.hint = noRouteHint(routes, 'Binary content is not inlined: only images and text-like files are returned.');
+          return mailboxUntrusted(out);
+        }
+        if (size > MAX_INLINE_BYTES) {
+          out.hint = noRouteHint(routes, 'Content is not inlined above 5 MB.');
+          return mailboxUntrusted(out);
+        }
       }
-      if ((meta.Size ?? 0) > MAX_INLINE_BYTES) {
-        out.hint = 'Content is not inlined above 5 MB. Open it in Outlook to read it.';
+      if (size > MAX_DOWNLOAD_BYTES) {
+        out.hint = 'Attachments over 50 MB are not downloaded. Open it in Outlook to read it.';
         return mailboxUntrusted(out);
       }
 
@@ -617,20 +679,48 @@ export function registerMailTools(server: McpServer, client: OutlookClient): voi
       }
       // Size is Outlook's figure for the whole record and can understate the
       // file; the base64 length bounds the real size, so judge it before decoding.
-      if (base64DecodedLength(bytes) > MAX_INLINE_BYTES) {
-        out.hint = 'Content is not inlined above 5 MB. Open it in Outlook to read it.';
+      const decodedSize = base64DecodedLength(bytes);
+      if (decodedSize > MAX_DOWNLOAD_BYTES) {
+        out.hint = 'Attachments over 50 MB are not downloaded. Open it in Outlook to read it.';
+        return mailboxUntrusted(out);
+      }
+      if (decodedSize > MAX_INLINE_BYTES && !canHandOver) {
+        out.hint = noRouteHint(routes, 'Content is not inlined above 5 MB.');
         return mailboxUntrusted(out);
       }
       const buf = Buffer.from(bytes, 'base64');
-      out.inlined = true;
-      if (image) {
-        // The name is the sender's text, so the metadata keeps its envelope; the image follows it.
-        const env = mailboxUntrusted(out);
-        return { ...env, content: [...env.content, ...imageResult(bytes, contentType).content] };
+      if (text && buf.length <= MAX_INLINE_BYTES) {
+        out.inlined = true;
+        out.text = buf.subarray(0, utf8Boundary(buf, MAX_TEXT_BYTES)).toString('utf8');
+        if (buf.length > MAX_TEXT_BYTES) out.textTruncated = true;
+        return mailboxUntrusted(out);
       }
-      out.text = buf.subarray(0, utf8Boundary(buf, MAX_TEXT_BYTES)).toString('utf8');
-      if (buf.length > MAX_TEXT_BYTES) out.textTruncated = true;
-      return mailboxUntrusted(out);
+
+      // The bytes themselves: an image inline when it fits; otherwise a signed
+      // link (hosted) or a fresh 0600 file in the download directory (local).
+      const delivered = await deliverFile({
+        // A standalone copy: a small Buffer shares Node's allocation pool, and
+        // mcp-utils' blob PUT (3.7.1) sends `view.slice().buffer` — for a Buffer
+        // that is the WHOLE pool, i.e. unrelated process memory.
+        bytes: new Uint8Array(buf),
+        fileName: name || 'attachment',
+        ...(contentType ? { mimeType: contentType } : {}),
+        store: routes.store ?? null,
+        keyPrefix: 'attachments',
+        inlineMaxBytes: MAX_INLINE_BYTES,
+        // Locally a non-image is saved rather than inlined as an embedded resource.
+        prefer: image || routes.store !== undefined ? 'auto' : 'disk',
+        ...(routes.diskDir !== undefined ? { disk: { dir: routes.diskDir, mode: 0o600 } } : {}),
+      });
+      out.inlined = delivered.via === 'image' || delivered.via === 'resource';
+      out.via = delivered.via;
+      if (delivered.url !== undefined) out.downloadUrl = delivered.url;
+      if (delivered.expiresAt !== undefined) out.downloadExpiresAt = delivered.expiresAt;
+      if (delivered.path !== undefined) out.path = delivered.path;
+      if (delivered.note !== undefined) out.deliveryNote = delivered.note;
+      // The name is the sender's text, so the metadata keeps its envelope; any inline bytes follow it.
+      const result = mailboxUntrusted(out);
+      return { ...result, content: [...result.content, ...delivered.content] };
     },
   );
 }
