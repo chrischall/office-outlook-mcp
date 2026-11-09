@@ -6,6 +6,7 @@ import type { OutlookClient } from '../client.js';
 import { briefDate, briefLine, briefResult, briefViewParam, spaced, workMeta } from './_hints.js';
 import {
   compactEvent,
+  detailedEvent,
   fullEvent,
   projectCollection,
   type OutlookEvent,
@@ -149,7 +150,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
     'outlook_get_event',
     {
       description:
-        'Get one calendar event in full, including attendees and their responses. Attendees appear in view:"full", every one of them — there is no 20-address cap as on a message\'s To/Cc; view:"raw" returns Outlook\'s untouched record, uncapped, Attendees included.' +
+        'Get one calendar event with its attendees and their responses. Attendees come back in EVERY view, including the default compact one — all of them, uncapped (no 20-address cap as on a message\'s To/Cc). The event\'s time is labelled with its zone in the `TimeZone` field (the mailbox zone unless you pass `timeZone`); the same instant read in another zone shows a different clock time, so read `TimeZone`, not just the clock. view:"full" adds the Teams join link, body preview and web link; view:"raw" returns Outlook\'s untouched record.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: workMeta('lookup'),
@@ -167,7 +168,7 @@ export function registerCalendarTools(server: McpServer, client: OutlookClient):
       );
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
-      return mailboxUntrusted(v === 'compact' ? compactEvent(data) : fullEvent(data));
+      return mailboxUntrusted(v === 'full' ? fullEvent(data) : detailedEvent(data));
     },
   );
 

@@ -160,13 +160,30 @@ export function compactEvent(e: OutlookEvent): Record<string, unknown> {
   });
 }
 
+/** Attendees projected as `{ Who, Response }`, or undefined when there are none. */
+export function eventAttendees(e: OutlookEvent): Record<string, unknown>[] | undefined {
+  return e.Attendees?.map((a) => pruned({ Who: addr(a), Response: a.Status?.Response }));
+}
+
+/**
+ * A single event's compact view WITH its attendees — what outlook_get_event
+ * returns by default.
+ *
+ * A single event is not a list, so the per-item cap that keeps attendees off
+ * list_events (one `calendarview` page can hold dozens of events) does not
+ * apply, and the attendees are the point of looking one event up. list_events
+ * still uses the attendee-free {@link compactEvent}; only get_event carries them
+ * in its compact view, as its description promises.
+ */
+export function detailedEvent(e: OutlookEvent): Record<string, unknown> {
+  return pruned({ ...compactEvent(e), Attendees: eventAttendees(e) });
+}
+
 export function fullEvent(e: OutlookEvent): Record<string, unknown> {
   return pruned({
     ...compactEvent(e),
     SeriesMasterId: e.SeriesMasterId,
-    Attendees: e.Attendees?.map((a) =>
-      pruned({ Who: addr(a), Response: a.Status?.Response }),
-    ),
+    Attendees: eventAttendees(e),
     // The Teams link lives under OnlineMeeting; OnlineMeetingUrl is empty on
     // every live Teams meeting checked.
     JoinUrl: e.OnlineMeeting?.JoinUrl || e.OnlineMeetingUrl || undefined,

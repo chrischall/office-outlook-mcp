@@ -154,17 +154,20 @@ describe('calendar tools', () => {
     Attendees: [{ EmailAddress: { Address: 'a@x.y' }, Status: { Response: 'Accepted' } }],
   };
 
-  it('gets one event, with attendees only in the full view', async () => {
+  it('gets one event with its attendees in every view, including the default compact', async () => {
     const client = stub(async () => event);
     const h = await createTestHarness((s: McpServer) => registerCalendarTools(s, client));
+    const attendees = [{ Who: 'a@x.y', Response: 'Accepted' }];
     const compact = parseToolResult<Record<string, unknown>>(
       await h.callTool('outlook_get_event', { id: 'e1' }),
     );
-    expect(compact).not.toHaveProperty('Attendees');
+    // A single-event get carries attendees by default — unlike the list view.
+    expect(compact.Attendees).toEqual(attendees);
+    expect(compact).not.toHaveProperty('WebLink'); // but stays lean
     const full = parseToolResult<Record<string, unknown>>(
       await h.callTool('outlook_get_event', { id: 'e1', view: 'full' }),
     );
-    expect(full.Attendees).toEqual([{ Who: 'a@x.y', Response: 'Accepted' }]);
+    expect(full.Attendees).toEqual(attendees);
     await h.close();
   });
 

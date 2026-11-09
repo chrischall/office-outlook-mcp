@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   compactEvent,
+  detailedEvent,
   compactFolder,
   compactMessage,
   fullEvent,
@@ -114,9 +115,21 @@ describe('event projection', () => {
     expect(c.Organizer).toBe('Dana <dana@example.com>');
   });
 
-  it('adds attendee responses only in the full view', () => {
-    expect(compactEvent(event)).not.toHaveProperty('Attendees');
+  it('adds attendee responses in the full view', () => {
     expect(fullEvent(event).Attendees).toEqual([{ Who: 'e@x.y', Response: 'Accepted' }]);
+  });
+
+  it('returns attendees from the single-event (detailed) view, which the list compact view omits', () => {
+    // get_event's default: attendees are the point of looking one event up.
+    expect(detailedEvent(event).Attendees).toEqual([{ Who: 'e@x.y', Response: 'Accepted' }]);
+    // list_events stays attendee-free (one page can hold dozens of events).
+    expect(compactEvent(event)).not.toHaveProperty('Attendees');
+    // ...and stays lean: no full-view extras.
+    expect(detailedEvent(event)).not.toHaveProperty('WebLink');
+  });
+
+  it('omits Attendees from the detailed view when the event has none', () => {
+    expect(detailedEvent({ Id: 'e3' })).not.toHaveProperty('Attendees');
   });
 
   // Live 2026-10-10 (clearing OOO days): without these an agent could not
