@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.4...v0.9.0) (2026-11-09)
+
+
+### Features
+
+* **copilot:** ask Microsoft 365 Copilot with your mailbox as context ([#113](https://github.com/chrischall/office-outlook-mcp/issues/113)) ([604d266](https://github.com/chrischall/office-outlook-mcp/commit/604d2663a29ebcdd89150c63a548018d9268808c))
+* **rules:** manage inbox rules and automatic replies ([#111](https://github.com/chrischall/office-outlook-mcp/issues/111)) ([11f9fd9](https://github.com/chrischall/office-outlook-mcp/commit/11f9fd93f72d20da5ab45bbffbc94ef06aae2858))
+
 ## [0.8.4](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.3...v0.8.4) (2026-11-07)
 
 

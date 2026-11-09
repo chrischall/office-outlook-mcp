@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.chrischall/office-outlook-mcp",
-  "description": "Outlook / Microsoft 365 for Claude \u2014 triage mail, reply, answer invites and book meetings, confirmed",
+  "description": "Outlook / Microsoft 365 for Claude — triage mail, reply, answer invites and book meetings, confirmed",
   "repository": {
     "url": "https://github.com/chrischall/office-outlook-mcp",
     "source": "github"
   },
-  "version": "0.8.4",
+  "version": "0.9.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@chrischall/office-outlook-mcp",
-      "version": "0.8.4",
+      "version": "0.9.0",
       "transport": {
         "type": "stdio"
       },
