@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.9.0...v0.10.0) (2026-11-09)
+
+
+### Features
+
+* **copilot:** label times in the mailbox zone, add verbatim mode, protect code indentation ([#115](https://github.com/chrischall/office-outlook-mcp/issues/115)) ([d883501](https://github.com/chrischall/office-outlook-mcp/commit/d8835019ca389d0761f496dfb5aa6d221c2dde3a))
+
+
+### Bug Fixes
+
+* **calendar:** return attendees from outlook_get_event in every view ([#114](https://github.com/chrischall/office-outlook-mcp/issues/114)) ([5d7137d](https://github.com/chrischall/office-outlook-mcp/commit/5d7137d7606affb8f0e8abec0a73b4d2afdb03c3))
+
 ## [0.9.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.8.4...v0.9.0) (2026-11-09)
 
 
