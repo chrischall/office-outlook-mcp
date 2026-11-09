@@ -8,6 +8,7 @@ import { registerDirectoryTools } from './tools/directory.js';
 import { registerWriteTools } from './tools/writes.js';
 import { registerHealthcheckTool } from './tools/healthcheck.js';
 import { registerExportTools } from './tools/export.js';
+import { registerRuleTools } from './tools/rules.js';
 
 loadDotenvSafely();
 
@@ -37,6 +38,7 @@ await runMcp({
     registerDirectoryTools,
     registerWriteTools,
     registerExportTools,
+    registerRuleTools,
     registerHealthcheckTool,
   ],
 });

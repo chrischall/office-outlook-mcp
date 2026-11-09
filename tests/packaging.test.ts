@@ -11,6 +11,7 @@ import { registerDirectoryTools } from '../src/tools/directory.js';
 import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
+import { registerRuleTools } from '../src/tools/rules.js';
 import type { OutlookClient } from '../src/client.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -263,6 +264,7 @@ async function registeredTools(): Promise<{ name: string; description?: string }
     registerWriteTools(server, client);
     registerHealthcheckTool(server, client);
     registerExportTools(server, client);
+    registerRuleTools(server, client);
   });
   const tools = await h.listTools();
   await h.close();

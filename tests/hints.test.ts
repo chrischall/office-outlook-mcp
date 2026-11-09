@@ -7,6 +7,7 @@ import { registerDirectoryTools } from '../src/tools/directory.js';
 import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
+import { registerRuleTools } from '../src/tools/rules.js';
 import type { OutlookClient } from '../src/client.js';
 
 /**
@@ -32,6 +33,7 @@ function harness(client: OutlookClient) {
     registerDirectoryTools(server, client);
     registerWriteTools(server, client);
     registerExportTools(server, client);
+    registerRuleTools(server, client);
     registerHealthcheckTool(server, client);
   });
 }
@@ -74,6 +76,11 @@ const EXPECTED_INTENT: Record<string, string> = {
   outlook_respond_to_invite: 'send',
   outlook_delete_event: 'change',
   outlook_reply: 'send',
+  outlook_list_rules: 'lookup',
+  outlook_create_rule: 'change',
+  outlook_update_rule: 'change',
+  outlook_delete_rule: 'change',
+  outlook_set_auto_reply: 'turn-on-off',
 };
 
 describe('_meta.mint on tools/list', () => {
