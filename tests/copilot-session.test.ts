@@ -125,6 +125,17 @@ describe('CopilotSession', () => {
     expect(cleanAnswer('Just three bullet points, nothing fancy.')).toBe('Just three bullet points, nothing fancy.');
   });
 
+  it('preserves leading indentation of a quoted code block while collapsing mid-line gaps', () => {
+    const raw = 'Here is the snippet:\n```\nfunction f() {\n    if (x) {\n\t\treturn 1;\n    }\n}\n```\nThat  was  it.';
+    expect(cleanAnswer(raw)).toBe(
+      'Here is the snippet:\n```\nfunction f() {\n    if (x) {\n\t\treturn 1;\n    }\n}\n```\nThat was it.',
+    );
+  });
+
+  it('collapses the double space a removed citation token leaves mid-line', () => {
+    expect(cleanAnswer('Two items citeturn1search3  remain.')).toBe('Two items remain.');
+  });
+
   it('cleans citation tokens that arrive in the streamed answer', async () => {
     stub = await startStub({
       respond: () => [delta('Reviewed. citeturn1search3 '), delta('All good.\u30101-abc123\u3011'), completion()],
