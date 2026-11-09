@@ -271,6 +271,10 @@
       "description": "Delete an inbox rule (asks you to confirm first)"
     },
     {
+      "name": "outlook_ask_copilot",
+      "description": "Ask Microsoft 365 Copilot a question answered from the signed-in mailbox (needs a one-time opencode-m365 login)"
+    },
+    {
       "name": "outlook_set_auto_reply",
       "description": "Turn automatic replies on, off or scheduled and set their text (asks you to confirm first)"
     },

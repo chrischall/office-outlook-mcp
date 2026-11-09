@@ -9,6 +9,8 @@ import { registerWriteTools } from './tools/writes.js';
 import { registerHealthcheckTool } from './tools/healthcheck.js';
 import { registerExportTools } from './tools/export.js';
 import { registerRuleTools } from './tools/rules.js';
+import { registerCopilotTools } from './tools/copilot.js';
+import { CopilotClient } from './copilot/client.js';
 
 loadDotenvSafely();
 
@@ -26,6 +28,15 @@ loadDotenvSafely();
  */
 const client = new OutlookClient();
 
+/**
+ * The Copilot client is its own dependency (its own MSAL cache handle and
+ * conversation state), separate from the OutlookClient. It is built here for the
+ * same reason — registrars run per connection — and closed over by the one
+ * registrar that needs it, so the shared `deps` stays the OutlookClient. Nothing
+ * here opens a socket or loads MSAL until the first ask.
+ */
+const copilot = new CopilotClient();
+
 await runMcp({
   name: 'office-outlook-mcp',
   version: VERSION,
@@ -39,6 +50,7 @@ await runMcp({
     registerWriteTools,
     registerExportTools,
     registerRuleTools,
+    (server) => registerCopilotTools(server, copilot),
     registerHealthcheckTool,
   ],
 });
