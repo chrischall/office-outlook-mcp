@@ -16,8 +16,32 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import type { CopilotClient } from '../copilot/client.js';
 import { DisengagedError } from '../copilot/session.js';
+import type { OutlookClient } from '../client.js';
+import { mailboxTimeZone } from '../timezone.js';
 import { workMeta } from './_hints.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
+
+/**
+ * A short context preamble prepended to every Copilot prompt.
+ *
+ * Copilot renders a stored UTC time as a bare clock with no zone — a 2026-11-09
+ * UTC time came back as "11:41 AM", which reads as local but is not. Telling it
+ * today's date and the mailbox zone, and to convert and label, fixes the
+ * labelling at the source. The mailbox zone is read once (cached per client); if
+ * it cannot be read — a server set up for Copilot but not the Outlook mail
+ * token — the instruction degrades to "label the zone" with no date-math hint.
+ */
+async function timeContext(outlook: OutlookClient): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10);
+  const zone = await mailboxTimeZone(outlook);
+  return zone
+    ? `(Context: today is ${today}. The user's mailbox time zone is ${zone}, and mailbox times are stored in UTC. When you state any date or time, convert it to ${zone} and label the zone.)`
+    : `(Context: today is ${today}. Mailbox times are stored in UTC — when you state a time, label its time zone.)`;
+}
+
+/** The extra instruction a verbatim request prepends. */
+const VERBATIM_DIRECTIVE =
+  "(Reproduce any content I ask you to quote or return IN FULL and verbatim — do not summarise, paraphrase, shorten, or omit any part of it, even if it is long.)";
 
 /** Stop a turn that outlives this, so a wedged connection cannot hang the call. */
 const TURN_TIMEOUT_MS = 120_000;
@@ -44,12 +68,12 @@ function turnSignal(hostSignal: AbortSignal | undefined): { signal: AbortSignal;
   };
 }
 
-export function registerCopilotTools(server: McpServer, copilot: CopilotClient): void {
+export function registerCopilotTools(server: McpServer, copilot: CopilotClient, outlook: OutlookClient): void {
   server.registerTool(
     'outlook_ask_copilot',
     {
       description:
-        'Ask Microsoft 365 Copilot a question answered from the signed-in mailbox (Copilot searches your own mail, calendar and files server-side and writes a reply). Use it for synthesis across many messages — "what needs my attention first", "summarise the thread with X", "did anyone ask me for anything this week". Follow-up calls continue the same conversation; pass newConversation:true to start fresh. The prompt is sent to Microsoft\'s Copilot service on your tenant; put your own question in it, not text copied from an email. Each call uses one of a per-conversation quota, reported back. First use needs a one-time sign-in: run `opencode-m365 login` (from the opencode-m365-copilot package) so an MSAL cache exists.' +
+        'Ask Microsoft 365 Copilot a question answered from the signed-in mailbox (Copilot searches your own mail, calendar and files server-side and writes a reply). Use it for synthesis across many messages — "what needs my attention first", "summarise the thread with X", "did anyone ask me for anything this week". Follow-up calls continue the same conversation; pass newConversation:true to start fresh. Pass verbatim:true when you need content quoted back in full (Copilot otherwise answers concisely and summarises long material; for a single item a focused "quote X in full" also works). Times are converted to the mailbox time zone and labelled. The prompt is sent to Microsoft\'s Copilot service on your tenant; put your own question in it, not text copied from an email. Each call uses one of a per-conversation quota, reported back. First use needs a one-time sign-in: run `opencode-m365 login` (from the opencode-m365-copilot package) so an MSAL cache exists.' +
         UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: workMeta('lookup', { aliases: ['copilot', 'ask copilot', 'm365 copilot'] }),
@@ -59,13 +83,20 @@ export function registerCopilotTools(server: McpServer, copilot: CopilotClient):
           .boolean()
           .optional()
           .describe('Start a fresh conversation with no prior context (default false: continue the current one)'),
+        verbatim: z
+          .boolean()
+          .optional()
+          .describe('Ask Copilot to quote requested content in full rather than summarising (default false). Use for retrieving a saved note, a full message, etc.'),
       }),
     },
-    async ({ prompt, newConversation }, ctx) => {
+    async ({ prompt, newConversation, verbatim }, ctx) => {
       if (newConversation) copilot.reset();
       const { signal, dispose } = turnSignal((ctx as { signal?: AbortSignal } | undefined)?.signal);
       try {
-        const result = await copilot.ask(prompt, { signal });
+        const preamble = [await timeContext(outlook), verbatim ? VERBATIM_DIRECTIVE : '']
+          .filter(Boolean)
+          .join(' ');
+        const result = await copilot.ask(`${preamble}\n\n${prompt}`, { signal });
         return mailboxUntrusted({
           answer: result.text,
           conversationId: copilot.conversationId,

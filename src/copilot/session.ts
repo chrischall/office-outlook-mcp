@@ -104,7 +104,10 @@ export function cleanAnswer(text: string): string {
     .replace(/cite(?:turn\d+[a-z]+\d+)+/gi, '')
     .replace(/【[^】]{1,60}】/g, '')
     .replace(/[ \t]+\n/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
+    // Collapse only runs that FOLLOW a non-space character (the double spaces a
+    // removed token leaves mid-line), never leading indentation — a Copilot
+    // answer can quote an indented code block from a mail or note.
+    .replace(/(\S)[ \t]{2,}/g, '$1 ')
     .trim();
 }
 
