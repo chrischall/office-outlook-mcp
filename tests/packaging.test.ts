@@ -12,6 +12,8 @@ import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
 import { registerRuleTools } from '../src/tools/rules.js';
+import { registerCopilotTools } from '../src/tools/copilot.js';
+import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -189,6 +191,8 @@ describe('publish scaffold', () => {
  * `MCP_CONFIRM_*` keys are mcp-utils' `confirmWrite` settings for the write
  * tools, as the README's Confirmations table documents them — without them an
  * mcpb or registry install has no way to set the confirmation mode at all.
+ * `OUTLOOK_COPILOT_MSAL_CACHE` points outlook_ask_copilot at the MSAL cache
+ * written by `opencode-m365 login`.
  */
 const ENV = [
   'FETCHPROXY_IDENTITY_DIR',
@@ -200,6 +204,7 @@ const ENV = [
   'OUTLOOK_ACCESS_TOKEN',
   'OUTLOOK_API_BASE',
   'OUTLOOK_CAPTURE_TIMEOUT',
+  'OUTLOOK_COPILOT_MSAL_CACHE',
   'OUTLOOK_DISABLE_FETCHPROXY',
   'OUTLOOK_OUTPUT_DIR',
   'OUTLOOK_TOKEN_CACHE',
@@ -265,6 +270,7 @@ async function registeredTools(): Promise<{ name: string; description?: string }
     registerHealthcheckTool(server, client);
     registerExportTools(server, client);
     registerRuleTools(server, client);
+    registerCopilotTools(server, {} as CopilotClient);
   });
   const tools = await h.listTools();
   await h.close();

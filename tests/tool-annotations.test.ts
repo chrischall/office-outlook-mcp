@@ -6,6 +6,8 @@ import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
 import { registerRuleTools } from '../src/tools/rules.js';
+import { registerCopilotTools } from '../src/tools/copilot.js';
+import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
 
 /**
@@ -37,12 +39,13 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerHealthcheckTool(server, client);
   registerExportTools(server, client);
   registerRuleTools(server, client);
+  registerCopilotTools(server, {} as CopilotClient);
   return seen;
 }
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(35);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(36);
   });
 
   it('follows the list/get naming rule: the renamed tools have no aliases', () => {

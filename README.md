@@ -180,6 +180,9 @@ including stored text you did not change. Read the current auto-reply with
 (calendar) write JSONL or Markdown files, optionally with attachments, and
 return only where they are; see [Bulk export](#bulk-export).
 
+**Copilot** — `outlook_ask_copilot` puts a question to Microsoft 365 Copilot
+with your mailbox as context; see [Microsoft 365 Copilot](#microsoft-365-copilot).
+
 **Diagnostics** — `outlook_healthcheck`
 
 Every read tool takes `view: compact | full | raw`, defaulting to **compact**.
@@ -203,8 +206,8 @@ the one read a preview makes.)
 Mail and event text is written by other people, so `outlook_list_messages`,
 `outlook_get_message`, `outlook_list_unread_messages`, `outlook_get_attachment`,
 `outlook_list_events`, `outlook_get_event`, `outlook_find_meeting_times`,
-`outlook_get_schedule`, `outlook_export_messages` and `outlook_export_events`
-wrap every result (all views) in an untrusted-content
+`outlook_get_schedule`, `outlook_export_messages`, `outlook_export_events` and
+`outlook_ask_copilot` wrap every result (all views) in an untrusted-content
 envelope — `untrusted_content: true` plus a `note` telling the model to treat
 the text as data, never instructions (a `view: raw` record that carries its
 own `untrusted_content`/`note` key is nested under `data`, so it cannot
@@ -215,6 +218,37 @@ On a client that cannot show a confirmation prompt, the confirmToken is still
 something the model passes back itself, so keep `MCP_CONFIRM_MODE=ask-user`
 (the default) and approve each preview in chat — or use a client that asks you
 before running non-read-only tools — as the real guard on outbound sends.
+
+## Microsoft 365 Copilot
+
+`outlook_ask_copilot` sends a question to **Microsoft 365 Copilot** and returns
+its answer. Copilot searches your own mail, calendar and files server-side
+(`WorkSearch`) and writes a reply — so this is for *synthesis* across many
+messages ("what needs my attention first", "summarise the thread with X") rather
+than fetching one message, which the read tools already do. Follow-up calls
+continue the same conversation; pass `newConversation: true` to start fresh. Each
+call uses one of a per-conversation quota, reported back, and the answer comes
+back in the untrusted-data envelope like every other mail-derived read.
+
+**Setup — a one-time sign-in.** Unlike the mail token (captured from your
+browser), the Copilot token is obtained by MSAL and refreshes silently, but the
+first sign-in needs a browser with MFA. Use the sibling CLI
+[`opencode-m365-copilot`](https://github.com/chrischall/opencode-copilot-plugin):
+
+```sh
+npm install -g opencode-m365-copilot
+opencode-m365 login        # one-time browser sign-in; writes an MSAL cache
+```
+
+This MCP reads that cache and refreshes from it. Override its location with
+`OUTLOOK_COPILOT_MSAL_CACHE` if you keep it elsewhere.
+
+**What it talks to.** M365 Copilot has no public API; this speaks the same
+undocumented SignalR-over-WebSocket protocol (`substrate.office.com`) that
+Microsoft's own Office web clients use, with the Office web Copilot client id.
+It reaches only Copilot on your own tenant and changes nothing in the mailbox,
+but it is reverse-engineered and may break when Microsoft changes it — and your
+organisation's acceptable-use policy still applies. Use at your discretion.
 
 ## Triage loop
 

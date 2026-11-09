@@ -4,7 +4,7 @@
   "name": "office-outlook-mcp",
   "display_name": "Outlook (Microsoft 365)",
   "version": "0.8.4",
-  "description": "Outlook / Microsoft 365 for Claude — triage unread mail, reply, answer meeting invites and schedule meetings, plus folders, calendar, contacts and tasks, with confirmation before anything is sent",
+  "description": "Outlook / Microsoft 365 for Claude \u2014 triage unread mail, reply, answer meeting invites and schedule meetings, plus folders, calendar, contacts and tasks, with confirmation before anything is sent",
   "author": {
     "name": "Chris Chall",
     "email": "chris.c.hall@gmail.com",
@@ -47,7 +47,8 @@
         "MCP_CONFIRM_MODE": "${user_config.confirm_mode}",
         "MCP_CONFIRM_ELICITATION": "${user_config.confirm_elicitation}",
         "MCP_CONFIRM_TTL_SECONDS": "${user_config.confirm_ttl_seconds}",
-        "MCP_CONFIRM_SECRET": "${user_config.confirm_secret}"
+        "MCP_CONFIRM_SECRET": "${user_config.confirm_secret}",
+        "OUTLOOK_COPILOT_MSAL_CACHE": "${user_config.outlook_copilot_msal_cache}"
       }
     }
   },
@@ -99,6 +100,12 @@
       "type": "string",
       "title": "Token cache file (advanced)",
       "description": "Path to the cached token file. Defaults to ~/.office-outlook-mcp/token.json.",
+      "required": false
+    },
+    "outlook_copilot_msal_cache": {
+      "type": "string",
+      "title": "Copilot MSAL cache (advanced)",
+      "description": "Path to the MSAL token cache written by `opencode-m365 login`, used by outlook_ask_copilot. Defaults to ~/.config/opencode-copilot/msal-cache.json.",
       "required": false
     },
     "outlook_output_dir": {
@@ -269,6 +276,10 @@
     {
       "name": "outlook_delete_rule",
       "description": "Delete an inbox rule (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_ask_copilot",
+      "description": "Ask Microsoft 365 Copilot a question answered from the signed-in mailbox (needs a one-time opencode-m365 login)"
     },
     {
       "name": "outlook_set_auto_reply",

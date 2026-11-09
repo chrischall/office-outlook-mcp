@@ -213,3 +213,24 @@ PATCH would change only their own copy, so `outlook_update_event` refuses it.
 | `400 RequestBroker--ParseUri` | the **path** is not a route at all (an unknown segment gives 400, not 404) |
 | `404` | valid route, bad id |
 | `500` on `/owa/0/service.svc` | that is OWA's internal endpoint, not this API |
+
+
+---
+
+## Microsoft 365 Copilot (separate from the REST API above)
+
+`outlook_ask_copilot` does NOT use the Outlook REST API or its token. Copilot is
+an undocumented SignalR-over-WebSocket service:
+
+- Endpoint: `wss://substrate.office.com/m365Copilot/Chathub/{oid}@{tid}` with the
+  access token in the URL query (`access_token=`), not a header.
+- Token audience: `https://substrate.office.com/sydney` (scopes
+  `M365Chat.Read`, `sydney.readwrite`) — a different audience than the mail
+  token, obtained via MSAL with the Office web Copilot client id
+  `c0ab8ce9-e9a0-42e7-b064-33d422df41f1`. It lives ~77 min and is refreshed
+  silently from the MSAL cache; it is never in a header or browser storage the
+  fetchproxy bridge could capture (verified live 2026-11-09).
+- The side-pane scenario (`agentHost=Bizchat.Sidepane`,
+  `scenario=OutlookSidepaneWorkCopilot`, agent capability `WorkSearch`) is the
+  surface that grounds the turn on the signed-in mailbox.
+- Protocol and auth adapted from `opencode-m365-copilot` (MIT, same owner).
