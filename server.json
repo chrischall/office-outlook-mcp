@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.chrischall/office-outlook-mcp",
-  "description": "Outlook / Microsoft 365 for Claude — triage mail, reply, answer invites and book meetings, confirmed",
+  "description": "Outlook / Microsoft 365 for Claude \u2014 triage mail, reply, answer invites and book meetings, confirmed",
   "repository": {
     "url": "https://github.com/chrischall/office-outlook-mcp",
     "source": "github"
@@ -110,6 +110,12 @@
           "isRequired": false,
           "format": "string",
           "isSecret": true
+        },
+        {
+          "name": "OUTLOOK_COPILOT_MSAL_CACHE",
+          "description": "Path to the MSAL token cache written by `opencode-m365 login`, read by outlook_ask_copilot. Defaults to ~/.config/opencode-copilot/msal-cache.json.",
+          "isRequired": false,
+          "format": "string"
         }
       ]
     }

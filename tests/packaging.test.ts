@@ -191,6 +191,8 @@ describe('publish scaffold', () => {
  * `MCP_CONFIRM_*` keys are mcp-utils' `confirmWrite` settings for the write
  * tools, as the README's Confirmations table documents them — without them an
  * mcpb or registry install has no way to set the confirmation mode at all.
+ * `OUTLOOK_COPILOT_MSAL_CACHE` points outlook_ask_copilot at the MSAL cache
+ * written by `opencode-m365 login`.
  */
 const ENV = [
   'FETCHPROXY_IDENTITY_DIR',
@@ -202,6 +204,7 @@ const ENV = [
   'OUTLOOK_ACCESS_TOKEN',
   'OUTLOOK_API_BASE',
   'OUTLOOK_CAPTURE_TIMEOUT',
+  'OUTLOOK_COPILOT_MSAL_CACHE',
   'OUTLOOK_DISABLE_FETCHPROXY',
   'OUTLOOK_OUTPUT_DIR',
   'OUTLOOK_TOKEN_CACHE',

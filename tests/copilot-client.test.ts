@@ -11,7 +11,7 @@ afterEach(async () => {
 /** A CopilotClient wired to the stub endpoint with an injected token. */
 function client(origin: string) {
   return new CopilotClient({
-    env: { OUTLOOK_COPILOT_ENDPOINT: origin } as NodeJS.ProcessEnv,
+    endpoint: origin,
     tokenClient: { getToken: async () => fakeToken('OID', 'TID'), invalidate: () => {} },
   });
 }

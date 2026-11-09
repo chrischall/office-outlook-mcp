@@ -7,12 +7,17 @@
  * registrar. Nothing here touches the network or MSAL until the first ask, so a
  * server never asked to reach Copilot pays nothing for it.
  */
-import { readEnvVar } from '@chrischall/mcp-utils';
 import { createCopilotTokenClient, type CopilotTokenClient } from './auth.js';
 import { CopilotSession, type TurnOptions, type TurnResult } from './session.js';
 
 export interface CopilotClientOptions {
   env?: NodeJS.ProcessEnv;
+  /**
+   * Override the Copilot WebSocket origin. Tests point this at a stub; the
+   * shipped server never sets it, so it is a constructor option rather than an
+   * env var the server reads (which the surface lint would require declaring).
+   */
+  endpoint?: string;
   /** Injected in tests; defaults to the real MSAL-backed client. */
   tokenClient?: CopilotTokenClient;
   /** Injected in tests; defaults to a real session over the token client. */
@@ -21,11 +26,13 @@ export interface CopilotClientOptions {
 
 export class CopilotClient {
   readonly #env: NodeJS.ProcessEnv;
+  readonly #endpoint: string | undefined;
   #tokenClient: CopilotTokenClient | undefined;
   #session: CopilotSession | undefined;
 
   constructor(opts: CopilotClientOptions = {}) {
     this.#env = opts.env ?? process.env;
+    this.#endpoint = opts.endpoint;
     this.#tokenClient = opts.tokenClient;
     this.#session = opts.session;
   }
@@ -38,7 +45,7 @@ export class CopilotClient {
   #sessionOrNew(): CopilotSession {
     this.#session ??= new CopilotSession({
       getToken: () => this.#tokens().getToken(),
-      endpoint: readEnvVar('OUTLOOK_COPILOT_ENDPOINT', { env: this.#env }),
+      endpoint: this.#endpoint,
     });
     return this.#session;
   }
