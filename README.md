@@ -131,13 +131,14 @@ Everything is optional — with nothing set, the server captures from the browse
 `outlook_list_calendars`, `outlook_find_meeting_times`,
 `outlook_get_schedule`, `outlook_get_profile`,
 `outlook_get_mailbox_settings`, `outlook_list_contacts`, `outlook_list_people`,
-`outlook_list_categories`, `outlook_list_tasks`
+`outlook_list_categories`, `outlook_list_tasks`, `outlook_list_rules`
 
 **Write** (ask you to confirm first — see [Confirmations](#confirmations)) —
 `outlook_send_message`, `outlook_create_draft`, `outlook_mark_read`,
 `outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
 `outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
-`outlook_reply`.
+`outlook_reply`, `outlook_create_rule`, `outlook_update_rule`,
+`outlook_delete_rule`, `outlook_set_auto_reply`.
 Some skip the confirmation because nothing reaches anyone else:
 `outlook_create_draft` (the draft stays in Drafts until you send it from
 Outlook), `outlook_reply` with `draftOnly: true` (the reply stays in Drafts),
@@ -164,6 +165,16 @@ you at declining instead. `outlook_list_events` and `outlook_get_event` show
 what that decision needs in every view: `MyResponse`, `ResponseRequested`,
 `IsOrganizer`, `IsCancelled`, `Type` (SingleInstance, Occurrence, Exception or
 SeriesMaster), `ShowAs` and `IsAllDay`, plus `SeriesMasterId` in the full view.
+
+**Rules and automatic replies** — `outlook_list_rules` shows inbox rules in the
+order Outlook applies them. `outlook_create_rule` needs at least one condition
+and one action; a rule that forwards or redirects mail names those recipients in
+its confirmation, because it keeps sending mail out until removed.
+`outlook_update_rule` sends only what you pass, and `conditions`, `exceptions`
+or `actions` replace that whole group. `outlook_set_auto_reply` changes only
+what you pass, and its confirmation shows the exact text that will go out,
+including stored text you did not change. Read the current auto-reply with
+`outlook_get_mailbox_settings`.
 
 **Export** — `outlook_export_messages` (mail) and `outlook_export_events`
 (calendar) write JSONL or Markdown files, optionally with attachments, and

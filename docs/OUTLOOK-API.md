@@ -72,7 +72,8 @@ All returned **200**:
 | `/me/contacts` | saved address book |
 | `/me/people` | relevance-ranked, drawn from mail traffic |
 | `/me/tasks` | Outlook tasks |
-| `/me/MailboxSettings` | time zone, working hours, auto-replies |
+| `/me/MailboxSettings` | time zone, working hours, auto-replies (PATCH of the whole `AutomaticRepliesSetting` verified 2026-11-09 with unchanged values) |
+| `/me/MailFolders/inbox/MessageRules` | inbox rules: `Id, DisplayName, Sequence, IsEnabled, HasError, IsReadOnly, Conditions, Actions` (GET, POST, PATCH and DELETE verified 2026-11-09; the path is case-insensitive; a PATCH of `Actions` replaces the whole group; `MoveToFolder` accepts an id resolved from a well-known name) |
 
 Query options verified: `$top`, `$skip`, `$select`, `$filter`, `$orderby`,
 `$search`, `$count`.

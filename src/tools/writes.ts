@@ -109,7 +109,7 @@ function isTeams(e: StoredEvent): boolean {
  * `zone`; a value with `Z` or an offset already names its instant and goes to
  * UTC rather than having the offset ignored.
  */
-function dateTimeTimeZone(value: string, zone: string): { DateTime: string; TimeZone: string } {
+export function dateTimeTimeZone(value: string, zone: string): { DateTime: string; TimeZone: string } {
   if (/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
     const d = new Date(value);
     if (!Number.isNaN(d.getTime())) {
@@ -123,7 +123,7 @@ function dateTimeTimeZone(value: string, zone: string): { DateTime: string; Time
  * Tool-description sentence for a write whose timeout leaves the outcome
  * unknown. Kept next to {@link unknownOutcome} so the two cannot drift.
  */
-const TIMEOUT_SENTENCE =
+export const TIMEOUT_SENTENCE =
   'If Outlook does not answer in time, the connection drops, or a server error (5xx) comes back after the request was sent, the result has status "unknown": the write may well have gone through, so check before retrying — never resend blindly.';
 
 /**
@@ -137,7 +137,7 @@ const TIMEOUT_SENTENCE =
  * send a second identical email. Any other failure is a real failure and
  * still throws.
  */
-function writeOrUnknown<T>(run: () => Promise<T>, checkWhere: string) {
+export function writeOrUnknown<T>(run: () => Promise<T>, checkWhere: string) {
   return runWriteOrUnknown(run, (e) =>
     minifiedResult({
       status: 'unknown',
