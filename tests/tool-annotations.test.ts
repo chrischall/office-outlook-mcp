@@ -39,7 +39,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerHealthcheckTool(server, client);
   registerExportTools(server, client);
   registerRuleTools(server, client);
-  registerCopilotTools(server, {} as CopilotClient);
+  registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
   return seen;
 }
 

@@ -36,7 +36,7 @@ function harness(client: OutlookClient) {
     registerWriteTools(server, client);
     registerExportTools(server, client);
     registerRuleTools(server, client);
-    registerCopilotTools(server, {} as CopilotClient);
+    registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
     registerHealthcheckTool(server, client);
   });
 }

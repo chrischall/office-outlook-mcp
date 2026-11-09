@@ -270,7 +270,7 @@ async function registeredTools(): Promise<{ name: string; description?: string }
     registerHealthcheckTool(server, client);
     registerExportTools(server, client);
     registerRuleTools(server, client);
-    registerCopilotTools(server, {} as CopilotClient);
+    registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
   });
   const tools = await h.listTools();
   await h.close();

@@ -50,7 +50,7 @@ await runMcp({
     registerWriteTools,
     registerExportTools,
     registerRuleTools,
-    (server) => registerCopilotTools(server, copilot),
+    (server) => registerCopilotTools(server, copilot, client),
     registerHealthcheckTool,
   ],
 });
