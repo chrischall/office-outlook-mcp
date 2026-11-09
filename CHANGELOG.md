@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.10.0...v0.10.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **deps:** bump @fetchproxy/server to 3.8 and MCP SDK to 2.4 ([#118](https://github.com/chrischall/office-outlook-mcp/issues/118)) ([75f678e](https://github.com/chrischall/office-outlook-mcp/commit/75f678e568fec465b6c9419386258964985161f0))
+
 ## [0.10.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.9.0...v0.10.0) (2026-11-09)
 
 
