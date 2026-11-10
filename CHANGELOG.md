@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.10.1...v0.11.0) (2026-11-10)
+
+
+### Features
+
+* **drafts:** edit unsent drafts with outlook_update_draft ([#126](https://github.com/chrischall/office-outlook-mcp/issues/126)) ([58012a3](https://github.com/chrischall/office-outlook-mcp/commit/58012a31a3b14caf43f692794946ceda65bb1018))
+* **drafts:** send an existing draft with outlook_send_draft ([#127](https://github.com/chrischall/office-outlook-mcp/issues/127)) ([8ec9d82](https://github.com/chrischall/office-outlook-mcp/commit/8ec9d8209d21765aca8870b8b9e8447d7700c62e))
+* **folders:** create, rename, move and delete mail folders ([#121](https://github.com/chrischall/office-outlook-mcp/issues/121)) ([b4711d1](https://github.com/chrischall/office-outlook-mcp/commit/b4711d1bbee19b64117d5695be586ef91cb5544b))
+
+
+### Bug Fixes
+
+* **folders:** accurate errors and previews, and safe large-folder deletes ([#124](https://github.com/chrischall/office-outlook-mcp/issues/124)) ([a17a232](https://github.com/chrischall/office-outlook-mcp/commit/a17a232b81ba468c97d9c358c1d968c93bdf7266))
+* **folders:** count subfolder mail in delete confirmations ([#125](https://github.com/chrischall/office-outlook-mcp/issues/125)) ([963a0a3](https://github.com/chrischall/office-outlook-mcp/commit/963a0a32aa39b14d4a16d4d1022401ef719de9d4))
+
 ## [0.10.1](https://github.com/chrischall/office-outlook-mcp/compare/v0.10.0...v0.10.1) (2026-11-09)
 
 
