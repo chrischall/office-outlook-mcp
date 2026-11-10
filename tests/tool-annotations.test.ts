@@ -6,6 +6,7 @@ import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
 import { registerRuleTools } from '../src/tools/rules.js';
+import { registerFolderTools } from '../src/tools/folders.js';
 import { registerCopilotTools } from '../src/tools/copilot.js';
 import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
@@ -39,13 +40,14 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerHealthcheckTool(server, client);
   registerExportTools(server, client);
   registerRuleTools(server, client);
+  registerFolderTools(server, client);
   registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
   return seen;
 }
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(36);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(39);
   });
 
   it('follows the list/get naming rule: the renamed tools have no aliases', () => {
@@ -105,5 +107,10 @@ describe('tool annotations', () => {
     expect(destructive('outlook_update_message')).toBe(false);
     // A response can be changed by responding again; nothing is deleted.
     expect(destructive('outlook_respond_to_invite')).toBe(false);
+    // An empty new folder is removed again; a rename or move is undone by another.
+    expect(destructive('outlook_create_folder')).toBe(false);
+    expect(destructive('outlook_update_folder')).toBe(false);
+    // Deleting a folder takes its mail and subfolders with it.
+    expect(destructive('outlook_delete_folder')).toBe(true);
   });
 });

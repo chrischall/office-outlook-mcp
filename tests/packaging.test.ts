@@ -12,6 +12,7 @@ import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
 import { registerRuleTools } from '../src/tools/rules.js';
+import { registerFolderTools } from '../src/tools/folders.js';
 import { registerCopilotTools } from '../src/tools/copilot.js';
 import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
@@ -270,6 +271,7 @@ async function registeredTools(): Promise<{ name: string; description?: string }
     registerHealthcheckTool(server, client);
     registerExportTools(server, client);
     registerRuleTools(server, client);
+    registerFolderTools(server, client);
     registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
   });
   const tools = await h.listTools();

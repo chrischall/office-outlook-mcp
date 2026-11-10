@@ -63,6 +63,7 @@ All returned **200**:
 | `/me/mailfolders` | `Id, DisplayName, ParentFolderId, ChildFolderCount, UnreadItemCount, TotalItemCount, SizeInBytes, IsHidden` |
 | `/me/mailfolders/{wellKnown}` | `inbox, drafts, sentitems, deleteditems, archive, junkemail, outbox, clutter` — all eight present |
 | `/me/mailfolders/{id}/messages` | folder-scoped listing |
+| `/me/mailfolders/{id}/childfolders` (POST), `/me/mailfolders/{id}` (PATCH, DELETE), `/me/mailfolders/{id}/move` (POST `DestinationId`) | folder create, rename, delete and move. Written from Microsoft's v2.0 MailFolder docs and NOT yet verified live: a duplicate name is expected to answer 409, and a delete may re-parent the folder under Deleted Items rather than remove it (the tool accepts either). `msgfolderroot` names the top level |
 | `/me/messages` | mailbox-wide; required for `$search` |
 | `/me/messages/{id}` | single message, includes `Body` |
 | `/me/messages/{id}/attachments` | `Id, Name, ContentType, Size` (+ `ContentBytes` unless `$select`ed out) |

@@ -45,7 +45,7 @@ import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js'
  * Well-known folder names the API accepts wherever a folder id is taken.
  * All eight verified present on a live mailbox 2026-09-20.
  */
-const WELL_KNOWN = [
+export const WELL_KNOWN = [
   'inbox',
   'drafts',
   'sentitems',

@@ -8,6 +8,7 @@ import { registerWriteTools } from '../src/tools/writes.js';
 import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
 import { registerRuleTools } from '../src/tools/rules.js';
+import { registerFolderTools } from '../src/tools/folders.js';
 import { registerCopilotTools } from '../src/tools/copilot.js';
 import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
@@ -36,6 +37,7 @@ function harness(client: OutlookClient) {
     registerWriteTools(server, client);
     registerExportTools(server, client);
     registerRuleTools(server, client);
+    registerFolderTools(server, client);
     registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
     registerHealthcheckTool(server, client);
   });
@@ -84,6 +86,9 @@ const EXPECTED_INTENT: Record<string, string> = {
   outlook_update_rule: 'change',
   outlook_delete_rule: 'change',
   outlook_set_auto_reply: 'turn-on-off',
+  outlook_create_folder: 'change',
+  outlook_update_folder: 'change',
+  outlook_delete_folder: 'change',
   outlook_ask_copilot: 'lookup',
 };
 
