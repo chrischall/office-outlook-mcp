@@ -7,6 +7,7 @@ import { registerHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerExportTools } from '../src/tools/export.js';
 import { registerRuleTools } from '../src/tools/rules.js';
 import { registerFolderTools } from '../src/tools/folders.js';
+import { registerDraftTools } from '../src/tools/drafts.js';
 import { registerCopilotTools } from '../src/tools/copilot.js';
 import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
@@ -41,13 +42,14 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerExportTools(server, client);
   registerRuleTools(server, client);
   registerFolderTools(server, client);
+  registerDraftTools(server, client);
   registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
   return seen;
 }
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(39);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(40);
   });
 
   it('follows the list/get naming rule: the renamed tools have no aliases', () => {
@@ -112,5 +114,7 @@ describe('tool annotations', () => {
     expect(destructive('outlook_update_folder')).toBe(false);
     // Deleting a folder takes its mail and subfolders with it.
     expect(destructive('outlook_delete_folder')).toBe(true);
+    // Editing a draft overwrites text that is kept nowhere else.
+    expect(destructive('outlook_update_draft')).toBe(true);
   });
 });

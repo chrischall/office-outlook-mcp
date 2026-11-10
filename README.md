@@ -134,7 +134,7 @@ Everything is optional — with nothing set, the server captures from the browse
 `outlook_list_categories`, `outlook_list_tasks`, `outlook_list_rules`
 
 **Write** (ask you to confirm first — see [Confirmations](#confirmations)) —
-`outlook_send_message`, `outlook_create_draft`, `outlook_mark_read`,
+`outlook_send_message`, `outlook_create_draft`, `outlook_update_draft`, `outlook_mark_read`,
 `outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
 `outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
 `outlook_reply`, `outlook_create_rule`, `outlook_update_rule`,

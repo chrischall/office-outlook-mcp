@@ -27,12 +27,12 @@ import {
 } from './_invite.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
-const recipientList = z
+export const recipientList = z
   .array(z.string().min(3))
   .optional()
   .describe('Email addresses');
 
-function toRecipients(list: string[] | undefined): { EmailAddress: { Address: string } }[] {
+export function toRecipients(list: string[] | undefined): { EmailAddress: { Address: string } }[] {
   return (list ?? []).map((Address) => ({ EmailAddress: { Address } }));
 }
 
@@ -344,7 +344,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_draft',
     {
       description:
-        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be reviewed and sent from Outlook. ' +
+        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be changed with outlook_update_draft and sent from Outlook. ' +
         'It does not ask to confirm: a draft reaches nobody until it is sent from Outlook. Calling it twice leaves two drafts. ' +
         TIMEOUT_SENTENCE,
       // Self-only and additive, like outlook_reply with draftOnly: nothing is
