@@ -10,6 +10,7 @@ import { registerHealthcheckTool } from './tools/healthcheck.js';
 import { registerExportTools } from './tools/export.js';
 import { registerRuleTools } from './tools/rules.js';
 import { registerFolderTools } from './tools/folders.js';
+import { registerDraftTools } from './tools/drafts.js';
 import { registerCopilotTools } from './tools/copilot.js';
 import { CopilotClient } from './copilot/client.js';
 
@@ -52,6 +53,7 @@ await runMcp({
     registerExportTools,
     registerRuleTools,
     registerFolderTools,
+    registerDraftTools,
     (server) => registerCopilotTools(server, copilot, client),
     registerHealthcheckTool,
   ],

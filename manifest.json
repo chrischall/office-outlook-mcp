@@ -230,6 +230,10 @@
       "description": "Create a draft in Drafts without sending it (no confirmation: it reaches nobody)"
     },
     {
+      "name": "outlook_update_draft",
+      "description": "Edit an unsent draft's subject, body or recipients (asks you to confirm first)"
+    },
+    {
       "name": "outlook_mark_read",
       "description": "Mark a message read or unread (asks you to confirm first)"
     },
