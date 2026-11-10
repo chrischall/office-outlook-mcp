@@ -52,7 +52,16 @@ function stub(
       folder({ Id: DELETED, DisplayName: 'Deleted Items' }),
       folder({ Id: 'archive-id', DisplayName: 'Archive' }),
       folder({ Id: 'f1', DisplayName: 'Alerts', ParentFolderId: 'inbox-id', TotalItemCount: 42, UnreadItemCount: 7, ChildFolderCount: 1 }),
-      folder({ Id: 'f1a', DisplayName: 'Old alerts', ParentFolderId: 'f1' }),
+      folder({ Id: 'f1a', DisplayName: 'Old alerts', ParentFolderId: 'f1', TotalItemCount: 8, UnreadItemCount: 2 }),
+      folder({ Id: 'eng', DisplayName: 'Engineering', ChildFolderCount: 2 }),
+      folder({ Id: 'eng-a', DisplayName: 'ETL', ParentFolderId: 'eng', TotalItemCount: 1000, UnreadItemCount: 990, ChildFolderCount: 1 }),
+      folder({ Id: 'eng-a1', DisplayName: 'Nested', ParentFolderId: 'eng-a', TotalItemCount: 5 }),
+      folder({ Id: 'eng-b', DisplayName: 'Empty', ParentFolderId: 'eng' }),
+      { Id: 'sparse', DisplayName: 'Sparse', ParentFolderId: ROOT, ChildFolderCount: 2 } as Folder,
+      { DisplayName: 'No id', ParentFolderId: 'sparse' } as Folder,
+      { Id: 'sparse-b', DisplayName: 'No counts', ParentFolderId: 'sparse' } as Folder,
+      folder({ Id: 'rss-id', DisplayName: 'RSS Feeds' }),
+      folder({ Id: 'hidden-parent', DisplayName: 'Conversation History', ChildFolderCount: 1 }),
     ]
   ).map((f) => ({ ...f }));
   const persist = opts.persist !== false;
@@ -66,7 +75,12 @@ function stub(
 
   const get = vi.fn(async (path: string): Promise<unknown> => {
     if (path === RULES) return { value: opts.rules ?? [] };
-    if (path.startsWith('/me/mailfolders/')) return find(seg(path, 3));
+    if (path.includes('/broken')) throw new ApiError(500, 'Outlook 500');
+    if (path.startsWith('/me/mailfolders/')) {
+      const f = find(seg(path, 3));
+      if (path.split('/')[4]?.startsWith('childfolders')) return { value: folders.filter((x) => x.ParentFolderId === f.Id) };
+      return f;
+    }
     throw new Error(`unexpected GET ${path}`);
   });
   const write = vi.fn(async (method: string, path: string, body?: Obj) => {
@@ -95,6 +109,10 @@ function stub(
       return { ...target, ...body };
     }
     if (method === 'DELETE') {
+      if (target.Id === 'eng-b') throw new ApiError(400, 'Outlook error 400: ErrorInvalidRequest');
+      if (target.Id === 'rss-id') {
+        throw new ApiError(400, 'Outlook error 400 for DELETE: {"error":{"code":"ErrorDeleteDistinguishedFolder","message":"Distinguished folders cannot be deleted."}}');
+      }
       if (!persist) return undefined;
       folders = folders.filter((f) => f.Id !== target.Id);
       return undefined;
@@ -110,6 +128,11 @@ type Result = Obj & { status?: string; confirmToken?: string; warning?: string }
 
 async function call(h: TestHarness, tool: string, args: Obj): Promise<Result> {
   return parseToolResult<Result>(await h.callTool(tool, args));
+}
+
+async function confirmedRaw(h: TestHarness, tool: string, args: Obj) {
+  const first = await call(h, tool, args);
+  return h.callTool(tool, { ...args, confirmToken: first.confirmToken });
 }
 
 async function confirmed(h: TestHarness, tool: string, args: Obj): Promise<Result> {
@@ -274,14 +297,51 @@ describe('outlook_delete_folder', () => {
     const first = await call(h, 'outlook_delete_folder', { id: 'f1' });
     const text = JSON.stringify(first);
     expect(text).toMatch(/Alerts/);
-    expect(text).toMatch(/42/);
-    expect(text).toMatch(/subfolder/i);
+    expect(text).toMatch(/50 messages \(9 unread\)/);
+    expect(text).toMatch(/1 subfolder/i);
     expect(text).toMatch(/does not go to Deleted Items/);
     expect(write).not.toHaveBeenCalled();
     const res = await call(h, 'outlook_delete_folder', { id: 'f1', confirmToken: first.confirmToken });
     expect(write.mock.calls).toEqual([['DELETE', '/me/mailfolders/f1']]);
     expect(res).toMatchObject({ deleted: true, Id: 'f1' });
     expect(now().some((f) => f.Id === 'f1')).toBe(false);
+    await h.close();
+  });
+
+  it('counts the mail in every subfolder, not just the folder itself', async () => {
+    const { client, write } = stub();
+    const h = await harness(client);
+    const text = JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'eng' }));
+    expect(text).toMatch(/1005 messages \(990 unread\)/);
+    expect(text).toMatch(/3 subfolders/);
+    expect(text).not.toMatch(/its 0 messages/);
+    expect(write).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('says "at least" when Outlook lists fewer subfolders than it counts (hidden ones)', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const text = JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'hidden-parent' }));
+    expect(text).toMatch(/at least 0 messages/);
+    await h.close();
+  });
+
+  it('names rules that file into a subfolder it would take with it', async () => {
+    const { client } = stub({ rules: [{ Id: 'r1', DisplayName: 'ETL jobs', Actions: { MoveToFolder: 'eng-a1' } }] });
+    const h = await harness(client);
+    expect(JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'eng' }))).toMatch(/ETL jobs/);
+    await h.close();
+  });
+
+  it("explains that Outlook refuses to delete one of its own folders given by id", async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const res = await confirmedRaw(h, 'outlook_delete_folder', { id: 'rss-id' });
+    expect(res.isError).toBe(true);
+    const text = JSON.stringify(res);
+    expect(text).toMatch(/one of Outlook's own folders/);
+    expect(text).not.toMatch(/Outlook error 400/);
     await h.close();
   });
 
@@ -342,6 +402,65 @@ describe('deleting a large folder', () => {
     expect(res.warning).toMatch(/still running|keeps running/i);
     expect(res.warning).toMatch(/Total/);
     expect(res.warning).toMatch(/not resend|do not retry|don't resend/i);
+    await h.close();
+  });
+});
+
+describe('folder edge cases', () => {
+  it.each(['outlook_update_folder', 'outlook_delete_folder'])('%s explains an id that matches no folder', async (tool) => {
+    const { client, write } = stub();
+    const h = await harness(client);
+    const res = await h.callTool(tool, { id: 'nope', name: 'x' });
+    expect(res.isError).toBe(true);
+    expect((res.content as Array<{ text: string }>)[0]?.text).toMatch(/No mail folder matches "nope"/);
+    expect(write).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('passes a server error on the folder read straight through', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const res = await h.callTool('outlook_delete_folder', { id: 'broken' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/500/);
+    await h.close();
+  });
+
+  it('passes through a 400 on delete that is not about a built-in folder', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const res = await confirmedRaw(h, 'outlook_delete_folder', { id: 'eng-b' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/ErrorInvalidRequest/);
+    expect(JSON.stringify(res)).not.toMatch(/Outlook's own folders/);
+    await h.close();
+  });
+
+  it('counts a subtree whose subfolders come back without counts or ids', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const text = JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'sparse' }));
+    expect(text).toMatch(/0 messages, counting its 2 subfolders/);
+    await h.close();
+  });
+
+  it.each([
+    ['rename', { id: 'f1', name: 'Pager' }],
+    ['move', { id: 'f1', parent: 'archive' }],
+  ])('reports an unknown outcome on a %s instead of inviting a retry', async (_label, args) => {
+    const { client } = stub({ writeError: new WriteOutcomeUnknownError('Outlook', 'POST', { timeoutMs: 60_000 }) });
+    const h = await harness(client);
+    const res = await confirmed(h, 'outlook_update_folder', args);
+    expect(res.status).toBe('unknown');
+    await h.close();
+  });
+
+  it('warns when Outlook accepts the move but the read-back still shows the old parent', async () => {
+    const { client } = stub({ persist: false });
+    const h = await harness(client);
+    const res = await confirmed(h, 'outlook_update_folder', { id: 'f1', parent: 'archive' });
+    expect(res).toMatchObject({ updated: false });
+    expect(res.warning).toMatch(/location/);
     await h.close();
   });
 });

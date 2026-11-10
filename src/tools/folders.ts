@@ -55,26 +55,77 @@ const STILL_DELETING =
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
+/** A folder's own counts plus every folder beneath it. */
+type Subtree = { total: number; unread: number; subfolders: number; ids: string[]; partial: boolean };
+
+/** Past this many folders the walk stops and the counts read "at least". */
+const SUBTREE_CAP = 500;
+const CHILD_SELECT = 'Id,TotalItemCount,UnreadItemCount,ChildFolderCount';
+
+/**
+ * A folder's own TotalItemCount leaves out its subfolders, and a delete takes
+ * them all: live 2026-11-10 a parent read "0 messages" over 2,725. So the
+ * confirmation walks the tree. A failed or capped walk is reported as a lower
+ * bound rather than blocking the delete.
+ */
+async function subtree(client: OutlookClient, root: OutlookFolder & { Id: string }): Promise<Subtree> {
+  const out: Subtree = {
+    total: root.TotalItemCount ?? 0,
+    unread: root.UnreadItemCount ?? 0,
+    subfolders: 0,
+    ids: [root.Id],
+    partial: false,
+  };
+  const queue: Array<{ id: string; expected: number }> =
+    (root.ChildFolderCount ?? 0) > 0 ? [{ id: root.Id, expected: root.ChildFolderCount ?? 0 }] : [];
+  while (queue.length) {
+    const { id: parent, expected } = queue.shift() as { id: string; expected: number };
+    if (out.subfolders >= SUBTREE_CAP) {
+      out.partial = true;
+      break;
+    }
+    let page: { value?: OutlookFolder[] };
+    try {
+      page = await client.get(`${folderPath(parent)}/childfolders`, { query: { $select: CHILD_SELECT, $top: 100 } });
+    } catch {
+      out.partial = true;
+      continue;
+    }
+    const kids = page.value ?? [];
+    // Hidden subfolders count in ChildFolderCount but are not listed (live: Conversation History).
+    if (kids.length >= 100 || kids.length < expected) out.partial = true;
+    for (const k of kids) {
+      out.subfolders++;
+      out.total += k.TotalItemCount ?? 0;
+      out.unread += k.UnreadItemCount ?? 0;
+      if (k.Id) {
+        out.ids.push(k.Id);
+        if ((k.ChildFolderCount ?? 0) > 0) queue.push({ id: k.Id, expected: k.ChildFolderCount ?? 0 });
+      }
+    }
+  }
+  return out;
+}
+
 /** What goes with a folder when it is deleted, in words. */
-function contents(f: OutlookFolder): string {
-  const total = f.TotalItemCount ?? 0;
-  const unread = f.UnreadItemCount ?? 0;
-  const parts = [`${plural(total, 'message')}${unread ? ` (${unread} unread)` : ''}`];
-  if (f.ChildFolderCount) parts.push(`${plural(f.ChildFolderCount, 'subfolder')} and everything in them`);
-  return parts.join(' and ');
+function contents(t: Subtree): string {
+  const atLeast = t.partial ? 'at least ' : '';
+  const mail = `${atLeast}${plural(t.total, 'message')}${t.unread ? ` (${t.unread} unread)` : ''}`;
+  return t.subfolders ? `${mail}, counting its ${atLeast}${plural(t.subfolders, 'subfolder')}` : mail;
 }
 
 type Rule = { DisplayName?: string; Actions?: { MoveToFolder?: string; CopyToFolder?: string } };
 
 /**
- * Rules that file mail into this folder. Losing the folder breaks them, so the
+ * Rules that file mail into this folder or any folder beneath it. Losing the folder breaks them, so the
  * confirmation names them. A failed read only loses the warning, not the delete.
  */
-async function rulesUsing(client: OutlookClient, id: string): Promise<string[]> {
+async function rulesUsing(client: OutlookClient, ids: string[]): Promise<string[]> {
+  const doomed = new Set(ids);
   try {
     const page = await client.get<{ value?: Rule[] }>(RULES_PATH);
     return (page.value ?? [])
-      .filter((r) => r.Actions?.MoveToFolder === id || r.Actions?.CopyToFolder === id)
+      .filter((r) => doomed.has(r.Actions?.MoveToFolder ?? '') || doomed.has(r.Actions?.CopyToFolder ?? ''))
       .map((r) => r.DisplayName ?? '(unnamed rule)');
   } catch {
     return [];
@@ -209,7 +260,7 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
     'outlook_delete_folder',
     {
       description:
-        'Delete a mail folder together with every message and subfolder in it. This is permanent: the folder does NOT go to Deleted Items, so it cannot be restored from there. To keep the mail, move it out first (outlook_move_message). The confirmation says how much mail goes with it and names any inbox rules that file into it (those rules stop working). Outlook\'s own folders are refused. The result is verified by re-reading the folder. A folder holding thousands of messages takes minutes to delete, so the call can come back with status "unknown" while Outlook keeps deleting: check its Total in outlook_list_folders falling, and never resend. ' +
+        'Delete a mail folder together with every message and subfolder in it. This is permanent: the folder does NOT go to Deleted Items, so it cannot be restored from there. To keep the mail, move it out first (outlook_move_message). The confirmation totals the mail in the folder and every subfolder beneath it, and names any inbox rules that file into them (those rules stop working). Outlook\'s own folders are refused. The result is verified by re-reading the folder. A folder holding thousands of messages takes minutes to delete, so the call can come back with status "unknown" while Outlook keeps deleting: check its Total in outlook_list_folders falling, and never resend. ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       _meta: workMeta('change', { aliases: ['remove folder'] }),
@@ -222,15 +273,16 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       refuseWellKnown(id, 'deleted');
       const current = await readFolder(client, id);
       const label = current.DisplayName ?? id;
-      const rules = await rulesUsing(client, current.Id ?? id);
+      const tree = await subtree(client, { ...current, Id: current.Id ?? id });
+      const rules = await rulesUsing(client, tree.ids);
       const ruleNote = rules.length
-        ? ` These inbox rules file mail into it and will stop working: ${rules.map((r) => `"${r}"`).join(', ')}.`
+        ? ` These inbox rules file mail into it or its subfolders and will stop working: ${rules.map((r) => `"${r}"`).join(', ')}.`
         : '';
       const gate = await confirmWrite(ctx, {
         tool: 'outlook_delete_folder',
         action: 'mail.folder_delete',
-        message: `Review and confirm permanently deleting this folder with its ${contents(current)} (it does not go to Deleted Items):${ruleNote}`,
-        summary: `Permanently delete folder "${label}" with its ${contents(current)}; it does not go to Deleted Items.${ruleNote}`,
+        message: `Review and confirm permanently deleting this folder with its ${contents(tree)} (it does not go to Deleted Items):${ruleNote}`,
+        summary: `Permanently delete folder "${label}" with its ${contents(tree)}; it does not go to Deleted Items.${ruleNote}`,
         account: undefined,
         target: id,
         request: { method: 'DELETE', path: folderPath(id) },
@@ -239,7 +291,18 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       });
       if (gate) return gate;
 
-      const write = await writeOrUnknown(() => client.write('DELETE', folderPath(id)), 'outlook_list_folders');
+      let write;
+      try {
+        write = await writeOrUnknown(() => client.write('DELETE', folderPath(id)), 'outlook_list_folders');
+      } catch (e) {
+        // Built-in folders such as RSS Feeds are not all reachable by a well-known name, so Outlook is the backstop.
+        if (errorStatusOf(e) === 400 && /ErrorDeleteDistinguishedFolder/.test(String((e as Error).message))) {
+          throw new McpToolError(`"${label}" is one of Outlook's own folders and cannot be deleted.`, {
+            hint: 'Nothing was deleted. Leave it in place, or delete the folders you created inside it instead.',
+          });
+        }
+        throw e;
+      }
       if (!write.ok) return minifiedResult({ status: 'unknown', Id: id, warning: STILL_DELETING });
       const read = await readBack(() => client.get<OutlookFolder>(folderPath(id)));
       if (!read.ok && errorStatusOf(read.error) === 404) return minifiedResult({ deleted: true, Id: id });
