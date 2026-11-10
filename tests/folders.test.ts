@@ -6,9 +6,11 @@ import { registerFolderTools } from '../src/tools/folders.js';
 import type { OutlookClient } from '../src/client.js';
 
 /**
- * Mail folder management. Paths and field names follow the Outlook REST v2.0
- * MailFolder resource (DisplayName, ParentFolderId, ChildFolderCount,
- * UnreadItemCount, TotalItemCount). Fixtures are synthetic.
+ * Mail folder management. Paths, status codes and field names match what the
+ * v2.0 MailFolder endpoints did live on 2026-11-10: a duplicate name answers 409
+ * ErrorFolderExists, a malformed parent 400, a move keeps the folder's Id, and a
+ * delete removes the folder outright (re-read 404s; nothing in Deleted Items).
+ * Fixtures are synthetic.
  */
 
 type Obj = Record<string, unknown>;
@@ -34,8 +36,6 @@ const ALIASES: Record<string, string> = { msgfolderroot: ROOT, inbox: 'inbox-id'
 
 /**
  * A mailbox held in memory, so every read-back sees what the write did.
- * `deleteMovesToDeletedItems` models a delete that re-parents the folder
- * instead of removing it outright.
  */
 function stub(
   opts: {
@@ -43,7 +43,6 @@ function stub(
     rules?: Obj[];
     persist?: boolean;
     writeError?: Error;
-    deleteMovesToDeletedItems?: boolean;
   } = {},
 ) {
   let folders: Folder[] = (
@@ -96,11 +95,7 @@ function stub(
     }
     if (method === 'DELETE') {
       if (!persist) return undefined;
-      if (opts.deleteMovesToDeletedItems) {
-        folders = folders.map((f) => (f.Id === target.Id ? { ...f, ParentFolderId: DELETED } : f));
-      } else {
-        folders = folders.filter((f) => f.Id !== target.Id);
-      }
+      folders = folders.filter((f) => f.Id !== target.Id);
       return undefined;
     }
     throw new Error(`unexpected ${method} ${path}`);
@@ -199,7 +194,9 @@ describe('outlook_update_folder', () => {
   it('moves to the top level with parent "msgfolderroot"', async () => {
     const { client, write } = stub();
     const h = await harness(client);
-    await confirmed(h, 'outlook_update_folder', { id: 'f1', parent: 'msgfolderroot' });
+    const first = await call(h, 'outlook_update_folder', { id: 'f1', parent: 'msgfolderroot' });
+    expect(JSON.stringify(first)).toMatch(/top level/);
+    await call(h, 'outlook_update_folder', { id: 'f1', parent: 'msgfolderroot', confirmToken: first.confirmToken });
     expect(write.mock.calls[0]).toEqual(['POST', '/me/mailfolders/f1/move', { DestinationId: ROOT }]);
     await h.close();
   });
@@ -258,20 +255,12 @@ describe('outlook_delete_folder', () => {
     expect(text).toMatch(/Alerts/);
     expect(text).toMatch(/42/);
     expect(text).toMatch(/subfolder/i);
+    expect(text).toMatch(/does not go to Deleted Items/);
     expect(write).not.toHaveBeenCalled();
     const res = await call(h, 'outlook_delete_folder', { id: 'f1', confirmToken: first.confirmToken });
     expect(write.mock.calls).toEqual([['DELETE', '/me/mailfolders/f1']]);
     expect(res).toMatchObject({ deleted: true, Id: 'f1' });
     expect(now().some((f) => f.Id === 'f1')).toBe(false);
-    await h.close();
-  });
-
-  it('counts a folder that landed in Deleted Items as deleted', async () => {
-    const { client } = stub({ deleteMovesToDeletedItems: true });
-    const h = await harness(client);
-    const res = await confirmed(h, 'outlook_delete_folder', { id: 'f1' });
-    expect(res).toMatchObject({ deleted: true });
-    expect(JSON.stringify(res)).toMatch(/Deleted Items/);
     await h.close();
   });
 

@@ -146,7 +146,7 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       const label = current.DisplayName ?? id;
       const changes = [
         ...(name !== undefined ? [`rename it to "${name}"`] : []),
-        ...(parent !== undefined ? [`move it into ${parent}`] : []),
+        ...(parent !== undefined ? [parent.toLowerCase() === ROOT ? 'move it to the top level' : `move it into ${parent}`] : []),
       ].join(' and ');
       const gate = await confirmWrite(ctx, {
         tool: 'outlook_update_folder',
@@ -198,7 +198,7 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
     'outlook_delete_folder',
     {
       description:
-        'Delete a mail folder together with every message and subfolder in it. The confirmation says how much mail goes with it and names any inbox rules that file into it (those rules stop working). Outlook\'s own folders are refused. The result is verified by re-reading the folder. ' +
+        'Delete a mail folder together with every message and subfolder in it. This is permanent: the folder does NOT go to Deleted Items, so it cannot be restored from there. To keep the mail, move it out first (outlook_move_message). The confirmation says how much mail goes with it and names any inbox rules that file into it (those rules stop working). Outlook\'s own folders are refused. The result is verified by re-reading the folder. ' +
         TIMEOUT_SENTENCE +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
@@ -220,8 +220,8 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       const gate = await confirmWrite(ctx, {
         tool: 'outlook_delete_folder',
         action: 'mail.folder_delete',
-        message: `Review and confirm deleting this folder with its ${contents(current)}:${ruleNote}`,
-        summary: `Delete folder "${label}" with its ${contents(current)}.${ruleNote}`,
+        message: `Review and confirm permanently deleting this folder with its ${contents(current)} (it does not go to Deleted Items):${ruleNote}`,
+        summary: `Permanently delete folder "${label}" with its ${contents(current)}; it does not go to Deleted Items.${ruleNote}`,
         account: undefined,
         target: id,
         request: { method: 'DELETE', path: folderPath(id) },
@@ -235,14 +235,6 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       const read = await readBack(() => client.get<OutlookFolder>(folderPath(id)));
       if (!read.ok && errorStatusOf(read.error) === 404) return minifiedResult({ deleted: true, Id: id });
       if (!read.ok) return minifiedResult({ deleted: true, Id: id, ...unverified('outlook_list_folders') });
-      // Outlook may keep the folder, re-parented under Deleted Items, rather than remove it.
-      if (read.value.ParentFolderId !== current.ParentFolderId) {
-        return minifiedResult({
-          deleted: true,
-          Id: id,
-          note: 'Outlook moved the folder to Deleted Items; it is removed for good when Deleted Items is emptied.',
-        });
-      }
       return minifiedResult({ deleted: false, Id: id, warning: 'Outlook accepted the delete but the folder is still there.' });
     },
   );
