@@ -44,6 +44,15 @@ async function readFolder(client: OutlookClient, id: string): Promise<OutlookFol
 
 const shown = (f: OutlookFolder) => ({ ...compactFolder(f), Parent: f.ParentFolderId });
 
+/**
+ * Outlook deletes a big folder's mail after the DELETE is accepted, at about 75
+ * messages a second (live 2026-11-10: 13,370 took ~3 minutes, 63,466 ~14), so
+ * the call outlives the client timeout. A resend while it runs would only
+ * restart a delete that is already happening.
+ */
+const STILL_DELETING =
+  'Outlook did not answer in time. A large folder keeps running its delete on the server for minutes after the request (about 75 messages a second), so it is probably still deleting. Check the folder\'s Total in outlook_list_folders: falling means it is working, gone means done. Do not resend the delete.';
+
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** What goes with a folder when it is deleted, in words. */
@@ -102,7 +111,7 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
             hint: 'Use the existing one (see outlook_list_folders) or pick another name.',
           });
         }
-        if (status === 400 || status === 404) {
+        if (parent !== undefined && (status === 400 || status === 404)) {
           throw new McpToolError(`No mail folder matches "${parent}".`, { hint: LIST_HINT });
         }
         throw e;
@@ -155,11 +164,13 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
         summary: `Folder "${label}": ${changes}.`,
         account: undefined,
         target: id,
-        request: {
-          method: 'PATCH',
-          path: folderPath(id),
-          body: { ...(name !== undefined ? { DisplayName: name } : {}), ...(destination ? { DestinationId: destination } : {}) },
-        },
+        // A rename and a move are separate calls; preview both, as sent.
+        payload: [
+          ...(name !== undefined ? [{ method: 'PATCH', path: folderPath(id), body: { DisplayName: name } }] : []),
+          ...(destination !== undefined
+            ? [{ method: 'POST', path: `${folderPath(id)}/move`, body: { DestinationId: destination } }]
+            : []),
+        ],
         confirmToken,
         preview: { current: shown(current) },
       });
@@ -198,9 +209,7 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
     'outlook_delete_folder',
     {
       description:
-        'Delete a mail folder together with every message and subfolder in it. This is permanent: the folder does NOT go to Deleted Items, so it cannot be restored from there. To keep the mail, move it out first (outlook_move_message). The confirmation says how much mail goes with it and names any inbox rules that file into it (those rules stop working). Outlook\'s own folders are refused. The result is verified by re-reading the folder. ' +
-        TIMEOUT_SENTENCE +
-        ' ' +
+        'Delete a mail folder together with every message and subfolder in it. This is permanent: the folder does NOT go to Deleted Items, so it cannot be restored from there. To keep the mail, move it out first (outlook_move_message). The confirmation says how much mail goes with it and names any inbox rules that file into it (those rules stop working). Outlook\'s own folders are refused. The result is verified by re-reading the folder. A folder holding thousands of messages takes minutes to delete, so the call can come back with status "unknown" while Outlook keeps deleting: check its Total in outlook_list_folders falling, and never resend. ' +
         CONFIRM_FLOW_SENTENCE,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       _meta: workMeta('change', { aliases: ['remove folder'] }),
@@ -231,7 +240,7 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       if (gate) return gate;
 
       const write = await writeOrUnknown(() => client.write('DELETE', folderPath(id)), 'outlook_list_folders');
-      if (!write.ok) return write.result;
+      if (!write.ok) return minifiedResult({ status: 'unknown', Id: id, warning: STILL_DELETING });
       const read = await readBack(() => client.get<OutlookFolder>(folderPath(id)));
       if (!read.ok && errorStatusOf(read.error) === 404) return minifiedResult({ deleted: true, Id: id });
       if (!read.ok) return minifiedResult({ deleted: true, Id: id, ...unverified('outlook_list_folders') });

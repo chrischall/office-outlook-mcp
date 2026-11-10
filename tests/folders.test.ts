@@ -74,6 +74,7 @@ function stub(
     const id = seg(path, 3);
     const tail = path.split('/')[4];
     if (method === 'POST' && tail === 'childfolders') {
+      if (body?.DisplayName === 'bad\\name') throw new ApiError(400, 'Outlook 400: ErrorInvalidRequest');
       const parent = find(id);
       if (folders.some((f) => f.ParentFolderId === parent.Id && f.DisplayName === body?.DisplayName)) {
         throw new ApiError(409, 'Outlook 409: ErrorFolderExists');
@@ -148,6 +149,15 @@ describe('outlook_create_folder', () => {
     await h.close();
   });
 
+  it('does not blame a missing parent when none was given', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const res = await h.callTool('outlook_create_folder', { name: 'bad\\name' });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).not.toMatch(/undefined|No mail folder matches/);
+    await h.close();
+  });
+
   it('explains a parent that does not exist', async () => {
     const { client } = stub();
     const h = await harness(client);
@@ -211,6 +221,17 @@ describe('outlook_update_folder', () => {
     ]);
     expect(res).toMatchObject({ updated: true, Name: 'Pager' });
     expect(now().find((f) => f.Id === 'f1')).toMatchObject({ DisplayName: 'Pager', ParentFolderId: 'archive-id' });
+    await h.close();
+  });
+
+  it('previews the requests it will actually send, in order', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const res = await call(h, 'outlook_update_folder', { id: 'f1', name: 'Pager', parent: 'archive' });
+    expect((res.preview as Obj).willSend).toEqual([
+      { method: 'PATCH', path: '/me/mailfolders/f1', body: { DisplayName: 'Pager' } },
+      { method: 'POST', path: '/me/mailfolders/f1/move', body: { DestinationId: 'archive-id' } },
+    ]);
     await h.close();
   });
 
@@ -308,6 +329,19 @@ describe('outlook_delete_folder', () => {
     const res = await confirmed(h, 'outlook_delete_folder', { id: 'f1' });
     expect(res).toMatchObject({ deleted: false });
     expect(res.warning).toBeTruthy();
+    await h.close();
+  });
+});
+
+describe('deleting a large folder', () => {
+  it('says the delete may still be running when Outlook does not answer in time, and not to resend', async () => {
+    const { client } = stub({ writeError: new WriteOutcomeUnknownError('Outlook', 'DELETE', { timeoutMs: 60_000 }) });
+    const h = await harness(client);
+    const res = await confirmed(h, 'outlook_delete_folder', { id: 'f1' });
+    expect(res.status).toBe('unknown');
+    expect(res.warning).toMatch(/still running|keeps running/i);
+    expect(res.warning).toMatch(/Total/);
+    expect(res.warning).toMatch(/not resend|do not retry|don't resend/i);
     await h.close();
   });
 });
