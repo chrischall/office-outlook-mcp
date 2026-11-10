@@ -92,6 +92,7 @@ const EXPECTED_INTENT: Record<string, string> = {
   outlook_update_folder: 'change',
   outlook_delete_folder: 'change',
   outlook_update_draft: 'change',
+  outlook_send_draft: 'send',
   outlook_ask_copilot: 'lookup',
 };
 

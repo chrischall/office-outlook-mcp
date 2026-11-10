@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   CONFIRM_FLOW_SENTENCE,
+  CONFIRM_INJECTION_RULE,
   confirmTokenParam,
   confirmWrite,
   errorStatusOf,
@@ -92,12 +93,25 @@ async function readDraft(client: OutlookClient, id: string): Promise<Draft> {
   return found;
 }
 
-export function registerDraftTools(server: McpServer, client: OutlookClient): void {
+/**
+ * How long to watch for a sent draft to leave Drafts. Outlook answers the send
+ * with 202 and delivers in the background: live 2026-11-10 the draft was still
+ * readable as a draft straight after the 202 although the mail arrived.
+ */
+const SEND_CHECK_TRIES = 8;
+
+export interface DraftToolOptions {
+  /** Pause between checks that a sent draft has left Drafts (default 1500 ms). */
+  sendCheckDelayMs?: number;
+}
+
+export function registerDraftTools(server: McpServer, client: OutlookClient, opts: DraftToolOptions = {}): void {
+  const delayMs = opts.sendCheckDelayMs ?? 1500;
   server.registerTool(
     'outlook_update_draft',
     {
       description:
-        'Edit an unsent draft: its subject, body, and To, Cc or Bcc recipients. Only what you pass changes, and each field you pass replaces the current one: `body` replaces the WHOLE body (in a reply or forward draft that includes the quoted original), and `to: []` clears the To line. Nothing is sent; send the draft from Outlook. Messages that are not drafts are refused. The confirmation shows the draft as it is now, because the replaced text cannot be recovered. The result is checked against the draft Outlook returns. ' +
+        'Edit an unsent draft: its subject, body, and To, Cc or Bcc recipients. Only what you pass changes, and each field you pass replaces the current one: `body` replaces the WHOLE body (in a reply or forward draft that includes the quoted original), and `to: []` clears the To line. Nothing is sent; send it with outlook_send_draft. Messages that are not drafts are refused. The confirmation shows the draft as it is now, because the replaced text cannot be recovered. The result is checked against the draft Outlook returns. ' +
         TIMEOUT_SENTENCE +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
@@ -171,6 +185,70 @@ export function registerDraftTools(server: McpServer, client: OutlookClient): vo
         updated: stale.length === 0,
         ...shown(after),
         ...(stale.length ? { warning: `Outlook accepted the edit but these did not change: ${stale.join(', ')}.` } : {}),
+      });
+    },
+  );
+
+  server.registerTool(
+    'outlook_send_draft',
+    {
+      description:
+        'Send an existing draft as it stands: its subject, body, recipients and attachments go out unchanged. To change it first, use outlook_update_draft. Refuses a message that is not a draft, or a draft with no recipients. The confirmation shows exactly what will be sent and to whom. Once sent, Outlook files the copy in Sent Items under a new id. Outlook finishes a send in the background, so the result waits a few seconds for the draft to leave Drafts; if it has not, the result says to check Sent Items, never to resend. ' +
+        TIMEOUT_SENTENCE +
+        ' ' +
+        CONFIRM_FLOW_SENTENCE +
+        ' ' +
+        CONFIRM_INJECTION_RULE,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      _meta: workMeta('send', { aliases: ['send draft', 'send the draft'] }),
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Draft Id (from outlook_create_draft, outlook_reply draftOnly, or outlook_list_messages folder "drafts")'),
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async ({ id, confirmToken }, ctx) => {
+      const current = await readDraft(client, id);
+      const view = shown(current);
+      const recipients = [...view.To, ...view.Cc, ...view.Bcc];
+      if (recipients.length === 0) {
+        throw new McpToolError(`Draft "${current.Subject ?? id}" has no recipients, so there is no one to send it to.`, {
+          hint: 'Add To, Cc or Bcc recipients with outlook_update_draft, then send it.',
+        });
+      }
+      const path = `${messagePath(id)}/send`;
+      const gate = await confirmWrite(ctx, {
+        tool: 'outlook_send_draft',
+        action: 'mail.send_draft',
+        message: 'Review and confirm this email before it is sent:',
+        summary: `Send draft "${current.Subject ?? ''}" to ${recipients.join(', ')}`,
+        account: undefined,
+        target: id,
+        request: { method: 'POST', path },
+        // The send carries no body: what goes out is the stored draft, so that is what is shown and bound.
+        willSend: { Subject: current.Subject, To: view.To, Cc: view.Cc, Bcc: view.Bcc, Body: currentBody(current) },
+        confirmToken,
+      });
+      if (gate) return gate;
+
+      const write = await writeOrUnknown(() => client.write('POST', path), 'Sent Items');
+      if (!write.ok) return write.result;
+      const summary = { subject: current.Subject, recipients };
+      // Sending moves the draft out of Drafts, so its old id stops resolving,
+      // but only once Outlook has finished: watch for that for a few seconds.
+      // Outlook accepted the send, so nothing here ever reports "not sent": a
+      // resend on that word would mail everyone twice.
+      for (let attempt = 1; attempt <= SEND_CHECK_TRIES; attempt++) {
+        const read = await readBack(() => client.get<Draft>(`${messagePath(id)}?$select=Id,IsDraft`));
+        if (!read.ok && errorStatusOf(read.error) === 404) return minifiedResult({ sent: true, ...summary });
+        if (!read.ok) return minifiedResult({ sent: true, ...summary, ...unverified('Sent Items') });
+        if (read.value.IsDraft !== true) return minifiedResult({ sent: true, ...summary });
+        if (attempt < SEND_CHECK_TRIES) await new Promise((r) => setTimeout(r, delayMs));
+      }
+      return minifiedResult({
+        sent: true,
+        verified: false,
+        ...summary,
+        warning: `Outlook accepted the send, but the draft had not left Drafts after ${Math.round((delayMs * (SEND_CHECK_TRIES - 1)) / 1000)} s; Outlook is probably still delivering it. Check Sent Items before doing anything else, and do not send it again unless it is missing there.`,
       });
     },
   );

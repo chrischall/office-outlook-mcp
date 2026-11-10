@@ -49,7 +49,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(40);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(41);
   });
 
   it('follows the list/get naming rule: the renamed tools have no aliases', () => {
@@ -116,5 +116,7 @@ describe('tool annotations', () => {
     expect(destructive('outlook_delete_folder')).toBe(true);
     // Editing a draft overwrites text that is kept nowhere else.
     expect(destructive('outlook_update_draft')).toBe(true);
+    // Sending a draft reaches its recipients and cannot be unsent.
+    expect(destructive('outlook_send_draft')).toBe(true);
   });
 });
