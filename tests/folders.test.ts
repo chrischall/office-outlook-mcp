@@ -52,7 +52,13 @@ function stub(
       folder({ Id: DELETED, DisplayName: 'Deleted Items' }),
       folder({ Id: 'archive-id', DisplayName: 'Archive' }),
       folder({ Id: 'f1', DisplayName: 'Alerts', ParentFolderId: 'inbox-id', TotalItemCount: 42, UnreadItemCount: 7, ChildFolderCount: 1 }),
-      folder({ Id: 'f1a', DisplayName: 'Old alerts', ParentFolderId: 'f1' }),
+      folder({ Id: 'f1a', DisplayName: 'Old alerts', ParentFolderId: 'f1', TotalItemCount: 8, UnreadItemCount: 2 }),
+      folder({ Id: 'eng', DisplayName: 'Engineering', ChildFolderCount: 2 }),
+      folder({ Id: 'eng-a', DisplayName: 'ETL', ParentFolderId: 'eng', TotalItemCount: 1000, UnreadItemCount: 990, ChildFolderCount: 1 }),
+      folder({ Id: 'eng-a1', DisplayName: 'Nested', ParentFolderId: 'eng-a', TotalItemCount: 5 }),
+      folder({ Id: 'eng-b', DisplayName: 'Empty', ParentFolderId: 'eng' }),
+      folder({ Id: 'rss-id', DisplayName: 'RSS Feeds' }),
+      folder({ Id: 'hidden-parent', DisplayName: 'Conversation History', ChildFolderCount: 1 }),
     ]
   ).map((f) => ({ ...f }));
   const persist = opts.persist !== false;
@@ -66,7 +72,11 @@ function stub(
 
   const get = vi.fn(async (path: string): Promise<unknown> => {
     if (path === RULES) return { value: opts.rules ?? [] };
-    if (path.startsWith('/me/mailfolders/')) return find(seg(path, 3));
+    if (path.startsWith('/me/mailfolders/')) {
+      const f = find(seg(path, 3));
+      if (path.split('/')[4]?.startsWith('childfolders')) return { value: folders.filter((x) => x.ParentFolderId === f.Id) };
+      return f;
+    }
     throw new Error(`unexpected GET ${path}`);
   });
   const write = vi.fn(async (method: string, path: string, body?: Obj) => {
@@ -95,6 +105,9 @@ function stub(
       return { ...target, ...body };
     }
     if (method === 'DELETE') {
+      if (target.Id === 'rss-id') {
+        throw new ApiError(400, 'Outlook error 400 for DELETE: {"error":{"code":"ErrorDeleteDistinguishedFolder","message":"Distinguished folders cannot be deleted."}}');
+      }
       if (!persist) return undefined;
       folders = folders.filter((f) => f.Id !== target.Id);
       return undefined;
@@ -110,6 +123,11 @@ type Result = Obj & { status?: string; confirmToken?: string; warning?: string }
 
 async function call(h: TestHarness, tool: string, args: Obj): Promise<Result> {
   return parseToolResult<Result>(await h.callTool(tool, args));
+}
+
+async function confirmedRaw(h: TestHarness, tool: string, args: Obj) {
+  const first = await call(h, tool, args);
+  return h.callTool(tool, { ...args, confirmToken: first.confirmToken });
 }
 
 async function confirmed(h: TestHarness, tool: string, args: Obj): Promise<Result> {
@@ -274,14 +292,51 @@ describe('outlook_delete_folder', () => {
     const first = await call(h, 'outlook_delete_folder', { id: 'f1' });
     const text = JSON.stringify(first);
     expect(text).toMatch(/Alerts/);
-    expect(text).toMatch(/42/);
-    expect(text).toMatch(/subfolder/i);
+    expect(text).toMatch(/50 messages \(9 unread\)/);
+    expect(text).toMatch(/1 subfolder/i);
     expect(text).toMatch(/does not go to Deleted Items/);
     expect(write).not.toHaveBeenCalled();
     const res = await call(h, 'outlook_delete_folder', { id: 'f1', confirmToken: first.confirmToken });
     expect(write.mock.calls).toEqual([['DELETE', '/me/mailfolders/f1']]);
     expect(res).toMatchObject({ deleted: true, Id: 'f1' });
     expect(now().some((f) => f.Id === 'f1')).toBe(false);
+    await h.close();
+  });
+
+  it('counts the mail in every subfolder, not just the folder itself', async () => {
+    const { client, write } = stub();
+    const h = await harness(client);
+    const text = JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'eng' }));
+    expect(text).toMatch(/1005 messages \(990 unread\)/);
+    expect(text).toMatch(/3 subfolders/);
+    expect(text).not.toMatch(/its 0 messages/);
+    expect(write).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('says "at least" when Outlook lists fewer subfolders than it counts (hidden ones)', async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const text = JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'hidden-parent' }));
+    expect(text).toMatch(/at least 0 messages/);
+    await h.close();
+  });
+
+  it('names rules that file into a subfolder it would take with it', async () => {
+    const { client } = stub({ rules: [{ Id: 'r1', DisplayName: 'ETL jobs', Actions: { MoveToFolder: 'eng-a1' } }] });
+    const h = await harness(client);
+    expect(JSON.stringify(await call(h, 'outlook_delete_folder', { id: 'eng' }))).toMatch(/ETL jobs/);
+    await h.close();
+  });
+
+  it("explains that Outlook refuses to delete one of its own folders given by id", async () => {
+    const { client } = stub();
+    const h = await harness(client);
+    const res = await confirmedRaw(h, 'outlook_delete_folder', { id: 'rss-id' });
+    expect(res.isError).toBe(true);
+    const text = JSON.stringify(res);
+    expect(text).toMatch(/one of Outlook's own folders/);
+    expect(text).not.toMatch(/Outlook error 400/);
     await h.close();
   });
 
