@@ -9,6 +9,7 @@ import { registerWriteTools } from './tools/writes.js';
 import { registerHealthcheckTool } from './tools/healthcheck.js';
 import { registerExportTools } from './tools/export.js';
 import { registerRuleTools } from './tools/rules.js';
+import { registerFolderTools } from './tools/folders.js';
 import { registerCopilotTools } from './tools/copilot.js';
 import { CopilotClient } from './copilot/client.js';
 
@@ -50,6 +51,7 @@ await runMcp({
     registerWriteTools,
     registerExportTools,
     registerRuleTools,
+    registerFolderTools,
     (server) => registerCopilotTools(server, copilot, client),
     registerHealthcheckTool,
   ],

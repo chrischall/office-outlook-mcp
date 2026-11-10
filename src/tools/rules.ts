@@ -87,7 +87,7 @@ function outlookConditions(c: ConditionArgs): Record<string, unknown> {
  * first. That also refuses a folder that does not exist before anyone is asked
  * to confirm a rule that could never work.
  */
-async function folderId(client: OutlookClient, folder: string | undefined): Promise<string | undefined> {
+export async function folderId(client: OutlookClient, folder: string | undefined): Promise<string | undefined> {
   if (folder === undefined) return undefined;
   try {
     const found = await client.get<{ Id?: string }>(`/me/mailfolders/${encodeURIComponent(folder)}?$select=Id`);
@@ -154,7 +154,7 @@ function endsBeforeStart(start: string, end: string): boolean {
  * The re-read after a write that Outlook accepted. If only the re-read fails,
  * the write still happened, so an error here would invite a duplicate.
  */
-async function readBack<T>(read: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+export async function readBack<T>(read: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
   try {
     return { ok: true, value: await read() };
   } catch (error) {
@@ -162,7 +162,7 @@ async function readBack<T>(read: () => Promise<T>): Promise<{ ok: true; value: T
   }
 }
 
-const unverified = (where: string) => ({
+export const unverified = (where: string) => ({
   verified: false,
   warning: `Outlook accepted this change but it could not be re-read. Check ${where} before retrying.`,
 });

@@ -262,6 +262,18 @@
       "description": "Reply, reply-all or forward a message, or save it as a draft (asks you to confirm first when sending)"
     },
     {
+      "name": "outlook_create_folder",
+      "description": "Create a mail folder, at the top level or inside another folder"
+    },
+    {
+      "name": "outlook_update_folder",
+      "description": "Rename a mail folder or move it under another folder (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_delete_folder",
+      "description": "Delete a mail folder with its mail and subfolders (asks you to confirm first)"
+    },
+    {
       "name": "outlook_list_rules",
       "description": "List inbox rules with their conditions and actions, in the order Outlook applies them"
     },
