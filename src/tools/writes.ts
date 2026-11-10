@@ -344,8 +344,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_create_draft',
     {
       description:
-        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be changed with outlook_update_draft and sent from Outlook. ' +
-        'It does not ask to confirm: a draft reaches nobody until it is sent from Outlook. Calling it twice leaves two drafts. ' +
+        'Create a draft message in the Drafts folder without sending it. Returns the created draft, which can be changed with outlook_update_draft and sent with outlook_send_draft. ' +
+        'It does not ask to confirm: a draft reaches nobody until it is sent. Calling it twice leaves two drafts. ' +
         TIMEOUT_SENTENCE,
       // Self-only and additive, like outlook_reply with draftOnly: nothing is
       // overwritten or sent. Not idempotent: a repeat creates a second draft.

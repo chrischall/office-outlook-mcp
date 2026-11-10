@@ -234,6 +234,10 @@
       "description": "Edit an unsent draft's subject, body or recipients (asks you to confirm first)"
     },
     {
+      "name": "outlook_send_draft",
+      "description": "Send an existing draft as it stands (asks you to confirm first)"
+    },
+    {
       "name": "outlook_mark_read",
       "description": "Mark a message read or unread (asks you to confirm first)"
     },
