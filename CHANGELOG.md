@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.11.0...v0.12.0) (2026-11-11)
+
+
+### Features
+
+* **mail:** write and read Markdown bodies ([#130](https://github.com/chrischall/office-outlook-mcp/issues/130)) ([5161906](https://github.com/chrischall/office-outlook-mcp/commit/5161906e5ba287e729a664b19ded5a86b8eb5cd6))
+* **reply:** add cc and bcc to replies, and addCc/removeCc to draft edits ([#128](https://github.com/chrischall/office-outlook-mcp/issues/128)) ([08b692b](https://github.com/chrischall/office-outlook-mcp/commit/08b692bde6080da5e002e61ba455b1c2cb31d180))
+
+
+### Bug Fixes
+
+* **mail:** keep html: true returning the raw HTML body ([#132](https://github.com/chrischall/office-outlook-mcp/issues/132)) ([9586c8d](https://github.com/chrischall/office-outlook-mcp/commit/9586c8da162e25c5525078b33ab6b03f9ef2d002))
+
 ## [0.11.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.10.1...v0.11.0) (2026-11-10)
 
 
