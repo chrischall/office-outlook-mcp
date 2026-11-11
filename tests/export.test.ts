@@ -209,6 +209,27 @@ describe('outlook_export_messages — disk mode', () => {
     expect(body).toContain(`${BODY} #3`);
   });
 
+  it('keeps the formatting in a Markdown transcript: bodies are read as HTML and converted', async () => {
+    const html = (n: number) => ({
+      ...msg(n, at(n)),
+      Body: {
+        ContentType: 'HTML',
+        Content: '<div style="display:none">preheader</div><p>Hi <b>team</b></p><ul><li>one</li></ul><a href="https://example.test/d">doc</a>',
+      },
+    });
+    const s = stub([html(1), html(2)]);
+    const out = parseToolResult<Result>(await call(s.client, { format: 'markdown' }));
+    expect(s.calls.find((c) => c.path.includes('/messages'))?.opts?.text).toBe(false);
+    const body = readFileSync(out.files.find((f) => f.path?.endsWith('.md'))!.path!, 'utf8');
+    expect(body).toContain('Hi **team**\n\n- one\n\n[doc](https://example.test/d)');
+    expect(body).not.toContain('preheader');
+    expect(body).not.toContain('<p>');
+    // JSONL keeps Outlook's plain text.
+    const j = stub([html(1)]);
+    await call(j.client, {});
+    expect(j.calls.find((c) => c.path.includes('/messages'))?.opts?.text).toBe(true);
+  });
+
   it('stops at max_items with has_more and a cursor; the cursor appends part-0002 to the same directory', async () => {
     const s = stub();
     const first = parseToolResult<Result>(await call(s.client, { max_items: 3 }));

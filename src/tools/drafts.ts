@@ -13,6 +13,7 @@ import type { OutlookClient } from '../client.js';
 import { workMeta } from './_hints.js';
 import { readBack, unverified } from './rules.js';
 import { recipientList, TIMEOUT_SENTENCE, toRecipients, writeOrUnknown } from './writes.js';
+import { composeBody, htmlAliasParam, resolveFormat, writeFormatParam } from './_body.js';
 
 type Recipient = { EmailAddress?: { Address?: string } };
 type Draft = {
@@ -111,7 +112,7 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
     'outlook_update_draft',
     {
       description:
-        'Edit an unsent draft: its subject, body, and To, Cc or Bcc recipients. Only what you pass changes, and each field you pass replaces the current one: `body` replaces the WHOLE body (in a reply or forward draft that includes the quoted original), and `to: []` clears the To line. To add or drop a Cc without retyping the rest, use `addCc` / `removeCc` instead of `cc`: the existing Cc stays. Nothing is sent; send it with outlook_send_draft. Messages that are not drafts are refused. The confirmation shows the draft as it is now, because the replaced text cannot be recovered. The result is checked against the draft Outlook returns. ' +
+        'Edit an unsent draft: its subject, body, and To, Cc or Bcc recipients. Only what you pass changes, and each field you pass replaces the current one: `body` replaces the WHOLE body (in a reply or forward draft that includes the quoted original), and `to: []` clears the To line. `format: "markdown"` writes the new body formatted. To add or drop a Cc without retyping the rest, use `addCc` / `removeCc` instead of `cc`: the existing Cc stays. Nothing is sent; send it with outlook_send_draft. Messages that are not drafts are refused. The confirmation shows the draft as it is now, because the replaced text cannot be recovered. The result is checked against the draft Outlook returns. ' +
         TIMEOUT_SENTENCE +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
@@ -123,7 +124,8 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
         id: z.string().min(1).describe('Draft Id (from outlook_create_draft, outlook_reply draftOnly, or outlook_list_messages folder "drafts")'),
         subject: z.string().optional().describe('New subject line'),
         body: z.string().optional().describe('New body; replaces the whole current body'),
-        html: z.boolean().optional().describe('Treat `body` as HTML (default: plain text). Only with `body`.'),
+        format: writeFormatParam.describe('How `body` is written: "text" (default), "markdown" (sent as formatted HTML) or "html". Only with `body`.'),
+        html: htmlAliasParam.describe('Same as format "html" (older spelling). Only with `body`.'),
         to: recipientList.describe('New To recipients; replaces the list ([] clears it)'),
         cc: recipientList.describe('New Cc recipients; replaces the list ([] clears it)'),
         bcc: recipientList.describe('New Bcc recipients; replaces the list ([] clears it)'),
@@ -132,10 +134,13 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ id, subject, body, html, to, cc, bcc, addCc, removeCc, confirmToken }, ctx) => {
-      if (html !== undefined && body === undefined) {
-        throw new McpToolError('`html` only applies together with `body`.', { hint: 'Pass the new `body` as well.' });
+    async ({ id, subject, body, format, html, to, cc, bcc, addCc, removeCc, confirmToken }, ctx) => {
+      if ((html !== undefined || format !== undefined) && body === undefined) {
+        throw new McpToolError(`\`${format !== undefined ? 'format' : 'html'}\` only applies together with \`body\`.`, {
+          hint: 'Pass the new `body` as well.',
+        });
       }
+      const bodyFormat = resolveFormat(format, html);
       const editsCc = Boolean(addCc?.length || removeCc?.length);
       if (cc !== undefined && editsCc) {
         throw new McpToolError('Pass either `cc` (the whole new list) or `addCc` / `removeCc` (changes to it), not both.', {
@@ -144,7 +149,7 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
       }
       const payload: Draft = {
         ...(subject !== undefined ? { Subject: subject } : {}),
-        ...(body !== undefined ? { Body: { ContentType: html === true ? 'HTML' : 'Text', Content: body } } : {}),
+        ...(body !== undefined ? { Body: composeBody(body, bodyFormat) } : {}),
         ...(to !== undefined ? { ToRecipients: toRecipients(to) } : {}),
         ...(cc !== undefined ? { CcRecipients: toRecipients(cc) } : {}),
         ...(bcc !== undefined ? { BccRecipients: toRecipients(bcc) } : {}),

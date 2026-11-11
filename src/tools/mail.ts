@@ -40,6 +40,7 @@ import {
   type FromPosition,
 } from './_paging.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
+import { htmlAliasParam, readBody, readFormatParam, resolveFormat } from './_body.js';
 
 /**
  * Well-known folder names the API accepts wherever a folder id is taken.
@@ -424,25 +425,27 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
     'outlook_get_message',
     {
       description:
-        'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); pass view:"raw" to get Outlook\'s untouched record. To and Cc list at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — view:"raw" returns every address.' +
+        'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); `format: "markdown"` keeps its structure (lists, tables, emphasis, links with their text) at about the same size, and `format: "html"` gives sanitised HTML. Hidden text in the HTML is dropped from both. Pass view:"raw" to get Outlook\'s untouched record. To and Cc list at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — view:"raw" returns every address.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: workMeta('lookup'),
       inputSchema: z.object({
         view: viewParam(VIEWS),
         id: z.string().min(1).describe('Message Id from outlook_list_messages'),
-        html: z
-          .boolean()
-          .optional()
-          .describe('Return the HTML body instead of plain text (default false)'),
+        format: readFormatParam,
+        html: htmlAliasParam,
       }),
     },
-    async ({ view, id, html }) => {
+    async ({ view, id, format, html }) => {
+      const bodyFormat = resolveFormat(format, html);
       const data = await client.get<OutlookMessage>(`/me/messages/${encodeURIComponent(id)}`, {
-        text: html !== true,
+        text: bodyFormat === 'text',
       });
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
+      if (data?.Body && bodyFormat !== 'text') {
+        data.Body = { ...data.Body, Content: readBody(data.Body, bodyFormat) };
+      }
       return mailboxUntrusted(v === 'full' ? fullMessage(data) : compactMessage(data));
     },
   );
@@ -483,11 +486,16 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
           .max(100_000)
           .optional()
           .describe('Truncate each body to this many characters (default 4000); `bodyTruncated` marks a cut'),
+        bodyFormat: z
+          .enum(['text', 'markdown'])
+          .optional()
+          .describe('"text" (default, Outlook\'s plain text) or "markdown" (keeps lists, tables, emphasis and links with their text; hidden text dropped)'),
         from: fromParam,
         nextLink: nextLinkParam,
       }),
     },
-    async ({ view, folder, limit, sinceHours, includeBody, maxBodyChars, from, nextLink }) => {
+    async ({ view, folder, limit, sinceHours, includeBody, maxBodyChars, bodyFormat, from, nextLink }) => {
+      const asMarkdown = bodyFormat === 'markdown';
       const pos = fromPosition(from, { nextLink, sinceHours });
       const max = limit ?? 25;
       const keyset = pos !== undefined ? fromQuery(pos, max) : undefined;
@@ -546,7 +554,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
           const one = await client.get<UnreadRow & { Event?: InviteEvent }>(
             `/me/messages/${encodeURIComponent(m.Id)}`,
             {
-              text: wantBody,
+              text: wantBody && !asMarkdown,
               query: {
                 $select: wantBody ? 'Id,Body' : 'Id',
                 $expand: wantEvent ? EVENT_EXPAND : undefined,
@@ -554,7 +562,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
             },
           );
           if (wantBody) {
-            const text = (one.Body?.Content ?? '').trim();
+            const text = (readBody(one.Body, asMarkdown ? 'markdown' : 'text') ?? '').trim();
             item.body = text.length > cap ? truncateChars(text, cap) : text;
             if (text.length > cap) item.bodyTruncated = true;
           }

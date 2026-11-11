@@ -26,6 +26,7 @@ import {
   type InviteEvent,
 } from './_invite.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
+import { composeBody, htmlAliasParam, resolveFormat, textAsHtml, writeFormatParam, type BodyFormat } from './_body.js';
 
 export const recipientList = z
   .array(z.string().min(3))
@@ -37,14 +38,11 @@ export function toRecipients(list: string[] | undefined): { EmailAddress: { Addr
 }
 
 /**
- * Body shape for a message. `ContentType` is `Text` by default — an agent
- * composing prose should not have to emit HTML, and Outlook renders text fine.
+ * Body shape for a message. Plain text by default — an agent composing prose
+ * should not have to emit HTML — or Markdown sent as formatted HTML.
  */
-function messageBody(subject: string, body: string, html: boolean | undefined) {
-  return {
-    Subject: subject,
-    Body: { ContentType: html === true ? 'HTML' : 'Text', Content: body },
-  };
+function messageBody(subject: string, body: string, format: BodyFormat) {
+  return { Subject: subject, Body: composeBody(body, format) };
 }
 
 /**
@@ -211,24 +209,26 @@ function addresses(...lists: (Address[] | undefined)[]): string[] {
   return [...seen.values()];
 }
 
-const escapeHtml = (t: string) =>
-  t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
 /**
  * The draft's body with `comment` written above the quoted original that
  * createreply/createforward put there. PATCHing a bare comment would replace
  * the quote, so the existing content is kept and the comment goes first —
- * inside `<body>` for HTML, so the result is still one document.
+ * inside `<body>` for HTML, so the result is still one document. A formatted
+ * comment on a plain-text draft turns the draft into HTML, its quote shown
+ * exactly as it was.
  */
 function bodyWithComment(
   body: { ContentType?: string; Content?: string } | undefined,
   comment: string,
+  format: BodyFormat,
 ): { ContentType: string; Content: string } {
   const existing = body?.Content ?? '';
-  if (body?.ContentType?.toLowerCase() !== 'html') {
+  const isHtml = body?.ContentType?.toLowerCase() === 'html';
+  if (!isHtml && format === 'text') {
     return { ContentType: 'Text', Content: existing ? `${comment}\n\n${existing}` : comment };
   }
-  const block = `<div>${escapeHtml(comment).replace(/\r?\n/g, '<br>')}</div><br>`;
+  const block = `${format === 'text' ? `<div>${textAsHtml(comment)}</div>` : composeBody(comment, format).Content}<br>`;
+  if (!isHtml) return { ContentType: 'HTML', Content: existing ? `${block}<div>${textAsHtml(existing)}</div>` : block };
   const open = /<body[^>]*>/i.exec(existing);
   const Content = open
     ? existing.slice(0, open.index + open[0].length) + block + existing.slice(open.index + open[0].length)
@@ -315,15 +315,16 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         bcc: recipientList,
         subject: z.string().describe('Subject line'),
         body: z.string().describe('Message body'),
-        html: z.boolean().optional().describe('Send the body as HTML (default: plain text)'),
+        format: writeFormatParam,
+        html: htmlAliasParam,
         saveToSentItems: z.boolean().optional().describe('Keep a copy in Sent Items (default true)'),
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ to, cc, bcc, subject, body, html, saveToSentItems, confirmToken }, ctx) => {
+    async ({ to, cc, bcc, subject, body, format, html, saveToSentItems, confirmToken }, ctx) => {
       const payload = {
         Message: {
-          ...messageBody(subject, body, html),
+          ...messageBody(subject, body, resolveFormat(format, html)),
           ToRecipients: toRecipients(to),
           ...(cc?.length ? { CcRecipients: toRecipients(cc) } : {}),
           ...(bcc?.length ? { BccRecipients: toRecipients(bcc) } : {}),
@@ -366,12 +367,13 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         cc: recipientList,
         subject: z.string().describe('Subject line'),
         body: z.string().describe('Message body'),
-        html: z.boolean().optional().describe('Compose the body as HTML (default: plain text)'),
+        format: writeFormatParam,
+        html: htmlAliasParam,
       }),
     },
-    async ({ to, cc, subject, body, html }) => {
+    async ({ to, cc, subject, body, format, html }) => {
       const payload = {
-        ...messageBody(subject, body, html),
+        ...messageBody(subject, body, resolveFormat(format, html)),
         ToRecipients: toRecipients(to),
         ...(cc?.length ? { CcRecipients: toRecipients(cc) } : {}),
       };
@@ -1087,7 +1089,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_reply',
     {
       description:
-        'Reply, reply-all or forward a message, with `comment` as your new text above the quoted original. Outlook picks the recipients for reply (the sender, or its Reply-To) and reply-all (sender plus the original To and Cc, minus you); a forward needs `to`. `cc` and `bcc` ADD people on top of those: on a reply-all the thread\'s existing Cc is kept and yours is appended, never replaced. `draftOnly: true` leaves the reply in Drafts and returns its id, sending nothing and asking no confirmation; otherwise it is sent at once, in this one call even with `cc`/`bcc` (no separate draft edit or send needed).' +
+        'Reply, reply-all or forward a message, with `comment` as your new text above the quoted original. Outlook picks the recipients for reply (the sender, or its Reply-To) and reply-all (sender plus the original To and Cc, minus you); a forward needs `to`. `cc` and `bcc` ADD people on top of those: on a reply-all the thread\'s existing Cc is kept and yours is appended, never replaced. `format: "markdown"` sends the comment formatted (bold, lists, links, quotes) above the quote. `draftOnly: true` leaves the reply in Drafts and returns its id, sending nothing and asking no confirmation; otherwise it is sent at once, in this one call even with `cc`/`bcc` or a formatted comment (no separate draft edit or send needed).' +
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' The preview shows the recipients, subject and comment. ' +
@@ -1102,6 +1104,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         messageId: z.string().min(1).describe('Id of the message to answer or forward'),
         mode: z.enum(['reply', 'replyAll', 'forward']).describe('reply (sender only), replyAll, or forward'),
         comment: z.string().describe('Your text, placed above the quoted original'),
+        format: writeFormatParam,
         to: recipientList.describe('Forward recipients\' email addresses (forward only, required there)'),
         cc: recipientList.describe('Extra Cc addresses, added to the ones Outlook keeps (reply-all keeps the thread\'s Cc)'),
         bcc: recipientList.describe('Bcc addresses to add'),
@@ -1112,7 +1115,8 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ messageId, mode, comment, to, cc, bcc, draftOnly, confirmToken }, ctx) => {
+    async ({ messageId, mode, comment, format, to, cc, bcc, draftOnly, confirmToken }, ctx) => {
+      const commentFormat = resolveFormat(format, undefined);
       if (mode === 'forward' && !to?.length) {
         throw new McpToolError('A forward needs at least one recipient.', {
           hint: 'Pass `to` with the addresses to forward to.',
@@ -1132,6 +1136,9 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       // adding people means: draft it, add them to what Outlook filled in,
       // then send that draft.
       const adding = extraCc.length > 0 || extraBcc.length > 0;
+      // The same goes for a formatted comment: the send endpoints insert the
+      // comment as plain text, so it is written into a draft as HTML instead.
+      const viaDraft = adding || commentFormat !== 'text';
       // Outlook's own entries are kept as they are (with their display
       // names); only addresses not already there are appended.
       const merged = (have: Address[] | undefined, extra: string[]) => {
@@ -1170,7 +1177,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         }
         try {
           const after = await client.write<DraftReply | undefined>('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
-            Body: bodyWithComment(created.Body, comment),
+            Body: bodyWithComment(created.Body, comment, commentFormat),
             ...forwardTo,
             ...addedRecipients(created),
           });
@@ -1258,16 +1265,17 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         // One signed-in mailbox per server process.
         account: undefined,
         target: messageId,
-        // With added people the writes are draft → edit → send; the token is
-        // bound to the people added, so a preview without them cannot send with them.
-        request: adding
-          ? { method: 'POST', path: `${base}/${draft}`, body: { ...payload, addCc: extraCc, addBcc: extraBcc } }
+        // With added people or a formatted comment the writes are draft → edit
+        // → send; the token is bound to the people added and the format, so a
+        // preview without them cannot send with them.
+        request: viaDraft
+          ? { method: 'POST', path: `${base}/${draft}`, body: { ...payload, addCc: extraCc, addBcc: extraBcc, format: commentFormat } }
           : { method: 'POST', path, body: payload },
         confirmToken,
       });
       if (gate) return gate;
 
-      if (!adding) {
+      if (!viaDraft) {
         const sent = await writeOrUnknown(() => client.write('POST', path, payload), 'Sent Items');
         if (!sent.ok) return sent.result;
         // Like sendmail, these return 202 with no body: nothing to re-read. The

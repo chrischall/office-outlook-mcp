@@ -76,6 +76,7 @@ import { mailboxTimeZone } from '../timezone.js';
 import { addr, addrs, type OutlookEvent, type OutlookMessage, type Recipient } from '../view.js';
 import { decodeFrom, encodeFrom, fromPage, fromQuery, type FromPosition } from './_paging.js';
 import { ATTACHMENT_META_SELECT, attachmentKind, base64DecodedLength, type OutlookAttachment } from './mail.js';
+import { readBody } from './_body.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 
 const SERVER_NAME = 'office-outlook-mcp';
@@ -333,7 +334,19 @@ interface AttachmentEntry {
 }
 
 /** One message as an export record: stable snake_case names, full recipient lists, the whole body. */
-function mailRecord(m: ExportMessage, folder: string): Record<string, unknown> {
+/**
+ * A body as an export record carries it: Outlook's plain text, or — for a
+ * Markdown transcript, where the bodies were read as HTML — Markdown, which
+ * keeps lists, tables, emphasis and links (hidden text dropped).
+ */
+function exportBody(body: { ContentType?: string; Content?: string } | undefined, markdown: boolean) {
+  const html = body?.ContentType?.toLowerCase() === 'html';
+  return markdown && html
+    ? { body_type: 'Markdown', body: readBody(body, 'markdown') ?? '' }
+    : { body_type: body?.ContentType, body: body?.Content ?? '' };
+}
+
+function mailRecord(m: ExportMessage, folder: string, markdown = false): Record<string, unknown> {
   return {
     id: m.Id,
     conversation_id: m.ConversationId,
@@ -353,13 +366,12 @@ function mailRecord(m: ExportMessage, folder: string): Record<string, unknown> {
     categories: m.Categories ?? [],
     has_attachments: m.HasAttachments ?? false,
     web_link: m.WebLink,
-    body_type: m.Body?.ContentType,
-    body: m.Body?.Content ?? '',
+    ...exportBody(m.Body, markdown),
   };
 }
 
 /** One calendar occurrence as an export record. Times are wall-clock in `time_zone`. */
-function eventRecord(e: ExportEvent, calendar: string): Record<string, unknown> {
+function eventRecord(e: ExportEvent, calendar: string, markdown = false): Record<string, unknown> {
   const joinUrl = e.OnlineMeeting?.JoinUrl || e.OnlineMeetingUrl || undefined;
   return {
     id: e.Id,
@@ -393,8 +405,7 @@ function eventRecord(e: ExportEvent, calendar: string): Record<string, unknown> 
     web_link: e.WebLink,
     created_at: e.CreatedDateTime,
     modified_at: e.LastModifiedDateTime,
-    body_type: e.Body?.ContentType,
-    body: e.Body?.Content ?? '',
+    ...exportBody(e.Body, markdown),
   };
 }
 
@@ -1000,7 +1011,7 @@ const ATTACHMENTS_DESCRIPTION =
 
 const MESSAGES_DESCRIPTION =
   'Bulk-export mail to files — thousands of messages without their text entering this conversation. ' +
-  'Pages the mailbox server-side oldest first and writes JSONL (one record per message: id, conversation_id, subject, from, to, cc, bcc, dates, flags, categories, full plain-text body; the first line is an `_export` header) or, with format:"markdown", a readable transcript. ' +
+  'Pages the mailbox server-side oldest first and writes JSONL (one record per message: id, conversation_id, subject, from, to, cc, bcc, dates, flags, categories, full plain-text body; the first line is an `_export` header) or, with format:"markdown", a readable transcript whose bodies are converted from HTML to Markdown (lists, tables, emphasis and links kept; hidden text dropped). ' +
   ATTACHMENTS_DESCRIPTION +
   MANIFEST_DESCRIPTION +
   'Message bodies are never returned here — read the files with shell tools (jq, grep, rg, head) rather than opening them whole. ' +
@@ -1011,7 +1022,7 @@ const MESSAGES_DESCRIPTION =
 const EVENTS_DESCRIPTION =
   'Bulk-export calendar events to files — a whole calendar without its text entering this conversation. ' +
   'Reads the calendar VIEW between `since` and `until` (required; at most two years per export), so recurring series are expanded into their individual occurrences, with times in the mailbox time zone. ' +
-  'Writes JSONL (one record per occurrence: id, ical_uid, type, series_master_id, subject, start, end, time_zone, location, organizer, attendees with their responses, your response, show_as, categories, join link, full plain-text body; the first line is an `_export` header) or, with format:"markdown", one section per event. ' +
+  'Writes JSONL (one record per occurrence: id, ical_uid, type, series_master_id, subject, start, end, time_zone, location, organizer, attendees with their responses, your response, show_as, categories, join link, full plain-text body; the first line is an `_export` header) or, with format:"markdown", one section per event, its body converted from HTML to Markdown. ' +
   ATTACHMENTS_DESCRIPTION +
   MANIFEST_DESCRIPTION +
   'Event bodies and attendees are never returned here — read the files with shell tools (jq, grep, rg, head) rather than opening them whole. ' +
@@ -1106,6 +1117,8 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
               ? { at: decodeFrom(encodeFrom(stored.at)) }
               : stored;
 
+      // A Markdown transcript reads bodies as HTML so their formatting survives.
+      const markdownBodies = args.format === 'markdown';
       const fetch = async (p: Position, remaining: number): Promise<Batch<ExportMessage>> => {
         if ('at' in p) {
           const { at } = p;
@@ -1113,7 +1126,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
           const { bound, top } = fromQuery(at, limit);
           const filter = until ? `${bound} and ReceivedDateTime lt ${until}` : bound;
           const query: QueryParams = { $top: top, $select: MAIL_SELECT, $filter: filter, $orderby: 'ReceivedDateTime asc' };
-          const data = await with429Retry(() => client.get<Page<ExportMessage>>(path, { text: true, query }), sleep);
+          const data = await with429Retry(() => client.get<Page<ExportMessage>>(path, { text: !markdownBodies, query }), sleep);
           const rows = Array.isArray(data?.value) ? data.value : [];
           const page = fromPage(rows, at, limit, Boolean(data?.['@odata.nextLink']));
           if (page.rows.length === 0 && page.has_more) {
@@ -1155,12 +1168,12 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
             with429Retry(
               () =>
                 client.get<Page<ExportMessage>>(path, {
-                  text: true,
+                  text: !markdownBodies,
                   query: { $search: `"${args.search!.replace(/"/g, '')}"`, $top: perPage, $select: MAIL_SELECT },
                 }),
               sleep,
             ),
-          (link) => with429Retry(() => client.getAbsolute<Page<ExportMessage>>(link, { text: true }), sleep),
+          (link) => with429Retry(() => client.getAbsolute<Page<ExportMessage>>(link, { text: !markdownBodies }), sleep),
           (m) => inRange(m.ReceivedDateTime, since, until),
         );
       };
@@ -1174,7 +1187,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
         ...(resumed ? { resumed } : {}),
         pos,
         fetch,
-        record: (m) => mailRecord(m, folder),
+        record: (m) => mailRecord(m, folder, markdownBodies),
         markdown: mailMarkdown,
         timeOf: (m) => m.ReceivedDateTime,
         itemPath: (m) => (m.Id ? `/me/messages/${encodeURIComponent(m.Id)}` : undefined),
@@ -1260,6 +1273,8 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
       if (!('offset' in stored)) throw new McpToolError('`cursor` is not a valid export cursor for this tool.');
       const pos: Position = stored;
 
+      // A Markdown transcript reads bodies as HTML so their formatting survives.
+      const markdownBodies = args.format === 'markdown';
       const fetch = (p: Position, remaining: number): Promise<Batch<ExportEvent>> =>
         linkBatch<ExportEvent>(
           p as LinkPosition,
@@ -1268,7 +1283,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
             with429Retry(
               () =>
                 client.get<Page<ExportEvent>>(path, {
-                  text: true,
+                  text: !markdownBodies,
                   ...(prefer ? { prefer } : {}),
                   query: {
                     startDateTime: since,
@@ -1281,7 +1296,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
               sleep,
             ),
           (link) =>
-            with429Retry(() => client.getAbsolute<Page<ExportEvent>>(link, { text: true, ...(prefer ? { prefer } : {}) }), sleep),
+            with429Retry(() => client.getAbsolute<Page<ExportEvent>>(link, { text: !markdownBodies, ...(prefer ? { prefer } : {}) }), sleep),
         );
 
       const calendar = args.calendar ?? 'default';
@@ -1294,7 +1309,7 @@ export function registerExportTools(server: McpServer, client: OutlookClient, op
         ...(resumed ? { resumed } : {}),
         pos,
         fetch,
-        record: (e) => eventRecord(e, calendar),
+        record: (e) => eventRecord(e, calendar, markdownBodies),
         markdown: eventMarkdown,
         timeOf: (e) => e.Start?.DateTime,
         itemPath: (e) => (e.Id ? `/me/events/${encodeURIComponent(e.Id)}` : undefined),
