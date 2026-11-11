@@ -212,6 +212,63 @@ describe('outlook_update_draft', () => {
   });
 });
 
+describe('outlook_update_draft — addCc / removeCc', () => {
+  const withCc = () => stub({ messages: [draft({ CcRecipients: [addr('naresh@example.test')] })] });
+
+  it('adds a cc while keeping the existing one, and shows the resulting Cc in the preview', async () => {
+    const { client, write, now } = withCc();
+    const h = await harness(client);
+    const first = await call(h, { id: 'd1', addCc: ['kiran@example.test'] });
+    expect(first.status).toBe('confirmation-required');
+    const shown = JSON.stringify(first);
+    expect(shown).toMatch(/naresh@example\.test/);
+    expect(shown).toMatch(/kiran@example\.test/);
+    expect(write).not.toHaveBeenCalled();
+    const res = await call(h, { id: 'd1', addCc: ['kiran@example.test'], confirmToken: first.confirmToken });
+    expect(res).toMatchObject({ updated: true, Cc: ['naresh@example.test', 'kiran@example.test'] });
+    // The existing entry keeps its display name; the new one is appended.
+    expect(now().CcRecipients).toEqual([addr('naresh@example.test'), { EmailAddress: { Address: 'kiran@example.test' } }]);
+    await h.close();
+  });
+
+  it('does not duplicate an address already on the Cc line (any case)', async () => {
+    const { client } = withCc();
+    const h = await harness(client);
+    const res = await confirmed(h, { id: 'd1', addCc: ['NARESH@example.test', 'kiran@example.test'] });
+    expect(res.Cc).toEqual(['naresh@example.test', 'kiran@example.test']);
+    await h.close();
+  });
+
+  it('removes one cc and leaves the others', async () => {
+    const { client } = stub({ messages: [draft({ CcRecipients: [addr('naresh@example.test'), addr('kiran@example.test')] })] });
+    const h = await harness(client);
+    const res = await confirmed(h, { id: 'd1', removeCc: ['Kiran@example.test'] });
+    expect(res).toMatchObject({ updated: true, Cc: ['naresh@example.test'] });
+    await h.close();
+  });
+
+  it('refuses to remove an address that is not on the Cc line, naming the current Cc', async () => {
+    const { client, write } = withCc();
+    const h = await harness(client);
+    const res = await h.callTool('outlook_update_draft', { id: 'd1', removeCc: ['nobody@example.test'] });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/nobody@example\.test/);
+    expect(text(res)).toMatch(/naresh@example\.test/);
+    expect(write).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('refuses cc together with addCc or removeCc', async () => {
+    const { client, write } = withCc();
+    const h = await harness(client);
+    const res = await h.callTool('outlook_update_draft', { id: 'd1', cc: ['a@example.test'], addCc: ['b@example.test'] });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/addCc|removeCc/);
+    expect(write).not.toHaveBeenCalled();
+    await h.close();
+  });
+});
+
 describe('outlook_send_draft', () => {
   const send = (h: TestHarness, args: Obj) => h.callTool('outlook_send_draft', args);
   const sendJson = async (h: TestHarness, args: Obj) => parseToolResult<Result>(await send(h, args));

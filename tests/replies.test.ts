@@ -346,6 +346,193 @@ describe('outlook_reply — draftOnly', () => {
   });
 });
 
+describe('outlook_reply — adding cc / bcc', () => {
+  /** A reply-all draft as createreplyall returns it: Outlook already filled To and Cc (minus you). */
+  const replyAllDraft = () =>
+    draft({
+      ToRecipients: [addr('alice@example.test'), addr('bob@example.test')],
+      CcRecipients: [{ EmailAddress: { Name: 'Carol, C', Address: 'carol@example.test' } }],
+    });
+
+  it('previews reply-all with the thread Cc AND the added cc, plus bcc', async () => {
+    const { client, writes } = stub({ draft: replyAllDraft() });
+    const h = await harness(client);
+    const res = parseToolResult<Rec>(
+      await h.callTool('outlook_reply', {
+        messageId: 'm-1',
+        mode: 'replyAll',
+        comment: 'adding Kiran',
+        cc: ['kiran@example.test'],
+        bcc: ['boss@example.test'],
+      }),
+    );
+    expect(res.status).toBe('confirmation-required');
+    const text = JSON.stringify(res);
+    expect(text).toMatch(/cc carol@example\.test/);
+    expect(text).toMatch(/cc kiran@example\.test/);
+    expect(text).toMatch(/bcc boss@example\.test/);
+    expect(writes()).toHaveLength(0);
+    await h.close();
+  });
+
+  it('once confirmed, drafts the reply-all, MERGES the cc into the thread Cc, keeps the quote, and sends the draft', async () => {
+    const { client, writes } = stub({ draft: replyAllDraft() });
+    const h = await harness(client);
+    const res = await confirmed(h, {
+      messageId: 'm-1',
+      mode: 'replyAll',
+      comment: 'adding Kiran',
+      cc: ['kiran@example.test', 'CAROL@example.test'],
+    });
+    expect(res.isError).toBeFalsy();
+    const w = writes();
+    expect(w.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'POST /me/messages/m-1/createreplyall',
+      'PATCH /me/messages/d-1',
+      'POST /me/messages/d-1/send',
+    ]);
+    const patch = w[1].body as Rec & { Body: { Content: string } };
+    // The old cc stays as Outlook had it (display name kept), the new one is
+    // added, and a case-different repeat is not doubled.
+    expect(patch.CcRecipients).toEqual([
+      { EmailAddress: { Name: 'Carol, C', Address: 'carol@example.test' } },
+      addr('kiran@example.test'),
+    ]);
+    // The To line is left to Outlook.
+    expect(patch).not.toHaveProperty('ToRecipients');
+    expect(patch.Body.Content).toMatch(/adding Kiran[\s\S]*quoted original/);
+    const body = parseToolResult<Rec>(res);
+    expect(body).toMatchObject({ sent: true, mode: 'replyAll' });
+    expect(body.cc).toEqual(['carol@example.test', 'kiran@example.test']);
+    expect(body.to).toEqual(['alice@example.test', 'bob@example.test']);
+    await h.close();
+  });
+
+  it('adds cc and bcc to a plain reply', async () => {
+    const { client, writes } = stub({ draft: draft({ ToRecipients: [addr('alice@example.test')] }) });
+    const h = await harness(client);
+    const res = await confirmed(h, {
+      messageId: 'm-1',
+      mode: 'reply',
+      comment: 'x',
+      cc: ['kiran@example.test'],
+      bcc: ['boss@example.test'],
+    });
+    expect(res.isError).toBeFalsy();
+    const patch = writes()[1].body as Rec;
+    expect(patch.CcRecipients).toEqual([addr('kiran@example.test')]);
+    expect(patch.BccRecipients).toEqual([addr('boss@example.test')]);
+    expect(writes()[2]).toMatchObject({ method: 'POST', path: '/me/messages/d-1/send' });
+    expect(parseToolResult<Rec>(res).bcc).toEqual(['boss@example.test']);
+    await h.close();
+  });
+
+  it('adds cc to a forward alongside its To', async () => {
+    const { client, writes } = stub();
+    const h = await harness(client);
+    await confirmed(h, { messageId: 'm-1', mode: 'forward', comment: 'fyi', to: ['dave@example.test'], cc: ['kiran@example.test'] });
+    expect(writes()[1].body).toMatchObject({
+      ToRecipients: [addr('dave@example.test')],
+      CcRecipients: [addr('kiran@example.test')],
+    });
+    await h.close();
+  });
+
+  it('merges the cc into a draftOnly reply-all, sending nothing', async () => {
+    const { client, writes } = stub({ draft: replyAllDraft() });
+    const h = await harness(client);
+    const res = await h.callTool('outlook_reply', {
+      messageId: 'm-1',
+      mode: 'replyAll',
+      comment: 'x',
+      cc: ['kiran@example.test'],
+      draftOnly: true,
+    });
+    expect(res.isError).toBeFalsy();
+    const w = writes();
+    expect(w).toHaveLength(2);
+    expect((w[1].body as Rec).CcRecipients).toEqual([
+      { EmailAddress: { Name: 'Carol, C', Address: 'carol@example.test' } },
+      addr('kiran@example.test'),
+    ]);
+    expect(parseToolResult<Rec>(res)).toMatchObject({ drafted: true, draftId: 'd-1' });
+    await h.close();
+  });
+
+  it('does not send when adding the cc to the draft fails, and names the leftover draft', async () => {
+    const { client, writes } = stub({ draft: replyAllDraft(), patchError: new Error('Outlook 500: oops') });
+    const h = await harness(client);
+    const res = await confirmed(h, { messageId: 'm-1', mode: 'replyAll', comment: 'x', cc: ['kiran@example.test'] });
+    expect(res.isError).toBeFalsy();
+    expect(writes().some((c) => c.path.endsWith('/send'))).toBe(false);
+    const body = parseToolResult<Rec>(res);
+    expect(body).toMatchObject({ sent: false, draftId: 'd-1' });
+    expect(String(body.warning)).toMatch(/not sent/i);
+    await h.close();
+  });
+
+  it('does not send when the draft Outlook returns is missing an expected cc', async () => {
+    const { client } = stub({ draft: replyAllDraft() });
+    // Outlook echoes the draft without the added cc.
+    (client.write as ReturnType<typeof vi.fn>).mockImplementation(async (method: string, path: string, body?: unknown) => {
+      if (path.endsWith('/createreplyall')) return replyAllDraft();
+      if (method === 'PATCH') return { ...replyAllDraft(), Body: (body as Rec).Body };
+      return undefined;
+    });
+    const h = await harness(client);
+    const res = await confirmed(h, { messageId: 'm-1', mode: 'replyAll', comment: 'x', cc: ['kiran@example.test'] });
+    const body = parseToolResult<Rec>(res);
+    expect(body).toMatchObject({ sent: false, draftId: 'd-1' });
+    expect(String(body.warning)).toMatch(/kiran@example\.test/);
+    expect((client.write as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[1]).endsWith('/send'))).toBe(false);
+    await h.close();
+  });
+
+  it('reports an unconfirmed send of the cc draft as unknown, pointing at Sent Items', async () => {
+    const { client } = stub({ draft: replyAllDraft() });
+    const real = (client.write as ReturnType<typeof vi.fn>).getMockImplementation() as (m: string, p: string, b?: unknown) => Promise<unknown>;
+    (client.write as ReturnType<typeof vi.fn>).mockImplementation(async (method: string, path: string, body?: unknown) => {
+      if (path.endsWith('/send')) throw new WriteOutcomeUnknownError('Outlook', 'POST', { timeoutMs: 60_000 });
+      return real(method, path, body);
+    });
+    const h = await harness(client);
+    const body = parseToolResult<Rec>(
+      await confirmed(h, { messageId: 'm-1', mode: 'replyAll', comment: 'x', cc: ['kiran@example.test'] }),
+    );
+    expect(body.status).toBe('unknown');
+    expect(String(body.warning)).toMatch(/Sent Items/);
+    await h.close();
+  });
+
+  it('binds the cc into the confirmation: a token from a preview without it does not send with it', async () => {
+    const { client, writes } = stub({ draft: replyAllDraft() });
+    const h = await harness(client);
+    const first = parseToolResult<{ confirmToken?: string }>(
+      await h.callTool('outlook_reply', { messageId: 'm-1', mode: 'replyAll', comment: 'x' }),
+    );
+    const res = parseToolResult<Rec>(
+      await h.callTool('outlook_reply', {
+        messageId: 'm-1',
+        mode: 'replyAll',
+        comment: 'x',
+        cc: ['kiran@example.test'],
+        confirmToken: first.confirmToken,
+      }),
+    );
+    expect(res.sent).not.toBe(true);
+    expect(writes()).toHaveLength(0);
+    await h.close();
+  });
+
+  it('keeps the plain reply path a single POST when no cc or bcc is given', async () => {
+    const { client, writes } = stub();
+    const h = await harness(client);
+    await confirmed(h, { messageId: 'm-1', mode: 'replyAll', comment: 'x', cc: [] });
+    expect(writes()).toEqual([{ method: 'POST', path: '/me/messages/m-1/replyall', body: { Comment: 'x' } }]);
+    await h.close();
+  });
+});
+
 describe('outlook_reply — annotations', () => {
   it('is destructive: a sent reply cannot be unsent', async () => {
     const { client } = stub();
