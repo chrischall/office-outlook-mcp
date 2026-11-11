@@ -272,7 +272,10 @@ An agent can work through new mail end to end without opening Outlook:
      id, so an answered invite is already filed — skip steps 3 and 4 for it
      (its old id would 404);
    - a message that needs an answer: `outlook_reply` (`reply`, `replyAll` or
-     `forward`), or `draftOnly: true` to leave it in Drafts for you to review;
+     `forward`), or `draftOnly: true` to leave it in Drafts for you to review.
+     `cc` / `bcc` add people in the same call — on `replyAll` the thread's
+     existing Cc is kept, not replaced. To change an existing draft's Cc
+     without retyping it, use `outlook_update_draft` with `addCc` / `removeCc`;
    - a request for a meeting: `outlook_find_meeting_times` for the attendees,
      then pass the chosen slot's `createEventArgs` to `outlook_create_event`;
    - an attachment to read: `outlook_get_attachment`.

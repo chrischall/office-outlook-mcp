@@ -111,7 +111,7 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
     'outlook_update_draft',
     {
       description:
-        'Edit an unsent draft: its subject, body, and To, Cc or Bcc recipients. Only what you pass changes, and each field you pass replaces the current one: `body` replaces the WHOLE body (in a reply or forward draft that includes the quoted original), and `to: []` clears the To line. Nothing is sent; send it with outlook_send_draft. Messages that are not drafts are refused. The confirmation shows the draft as it is now, because the replaced text cannot be recovered. The result is checked against the draft Outlook returns. ' +
+        'Edit an unsent draft: its subject, body, and To, Cc or Bcc recipients. Only what you pass changes, and each field you pass replaces the current one: `body` replaces the WHOLE body (in a reply or forward draft that includes the quoted original), and `to: []` clears the To line. To add or drop a Cc without retyping the rest, use `addCc` / `removeCc` instead of `cc`: the existing Cc stays. Nothing is sent; send it with outlook_send_draft. Messages that are not drafts are refused. The confirmation shows the draft as it is now, because the replaced text cannot be recovered. The result is checked against the draft Outlook returns. ' +
         TIMEOUT_SENTENCE +
         ' ' +
         CONFIRM_FLOW_SENTENCE,
@@ -127,12 +127,20 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
         to: recipientList.describe('New To recipients; replaces the list ([] clears it)'),
         cc: recipientList.describe('New Cc recipients; replaces the list ([] clears it)'),
         bcc: recipientList.describe('New Bcc recipients; replaces the list ([] clears it)'),
+        addCc: recipientList.describe('Cc addresses to add, keeping the current Cc (not with `cc`)'),
+        removeCc: recipientList.describe('Cc addresses to take off, keeping the rest (not with `cc`)'),
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ id, subject, body, html, to, cc, bcc, confirmToken }, ctx) => {
+    async ({ id, subject, body, html, to, cc, bcc, addCc, removeCc, confirmToken }, ctx) => {
       if (html !== undefined && body === undefined) {
         throw new McpToolError('`html` only applies together with `body`.', { hint: 'Pass the new `body` as well.' });
+      }
+      const editsCc = Boolean(addCc?.length || removeCc?.length);
+      if (cc !== undefined && editsCc) {
+        throw new McpToolError('Pass either `cc` (the whole new list) or `addCc` / `removeCc` (changes to it), not both.', {
+          hint: 'Use addCc / removeCc to keep the current Cc, or cc alone to replace it.',
+        });
       }
       const payload: Draft = {
         ...(subject !== undefined ? { Subject: subject } : {}),
@@ -141,17 +149,48 @@ export function registerDraftTools(server: McpServer, client: OutlookClient, opt
         ...(cc !== undefined ? { CcRecipients: toRecipients(cc) } : {}),
         ...(bcc !== undefined ? { BccRecipients: toRecipients(bcc) } : {}),
       };
-      if (Object.keys(payload).length === 0) {
+      if (Object.keys(payload).length === 0 && !editsCc) {
         throw new McpToolError('Nothing to change on this draft.', {
-          hint: 'Pass at least one of subject, body, to, cc or bcc.',
+          hint: 'Pass at least one of subject, body, to, cc, addCc, removeCc or bcc.',
         });
       }
       const current = await readDraft(client, id);
+      let ccChange = '';
+      if (editsCc) {
+        const now = addresses(current.CcRecipients).filter(Boolean);
+        const lower = (xs: string[]) => new Set(xs.map((x) => x.toLowerCase()));
+        const absent = (removeCc ?? []).filter((r) => !lower(now).has(r.toLowerCase()));
+        if (absent.length) {
+          throw new McpToolError(`Not on this draft's Cc line: ${absent.join(', ')}.`, {
+            hint: `The current Cc is: ${now.length ? now.join(', ') : '(empty)'}.`,
+          });
+        }
+        const dropped = lower(removeCc ?? []);
+        // Entries already on the draft are kept as Outlook has them (display names included).
+        const kept = (current.CcRecipients ?? []).filter((r) => !dropped.has((r.EmailAddress?.Address ?? '').toLowerCase()));
+        const keptSet = lower(addresses(kept));
+        const fresh: string[] = [];
+        for (const a of addCc ?? []) {
+          if (dropped.has(a.toLowerCase()) || keptSet.has(a.toLowerCase())) continue;
+          keptSet.add(a.toLowerCase());
+          fresh.push(a);
+        }
+        payload.CcRecipients = [...kept, ...toRecipients(fresh)];
+        const next = addresses(payload.CcRecipients);
+        ccChange = [
+          addCc?.length ? `adding ${addCc.join(', ')}` : '',
+          removeCc?.length ? `removing ${removeCc.join(', ')}` : '',
+        ]
+          .filter(Boolean)
+          .join(' and ');
+        ccChange = `Cc list (${ccChange}; it becomes: ${next.length ? next.join(', ') : '(empty)'})`;
+      }
       const fields = [
         ...(subject !== undefined ? ['subject'] : []),
         ...(body !== undefined ? ['whole body'] : []),
         ...(to !== undefined ? ['To list'] : []),
         ...(cc !== undefined ? ['Cc list'] : []),
+        ...(ccChange ? [ccChange] : []),
         ...(bcc !== undefined ? ['Bcc list'] : []),
       ];
       const path = messagePath(id);

@@ -183,6 +183,16 @@ const REPLY_MODES = {
 
 type Address = { EmailAddress?: { Address?: string; Name?: string } };
 
+/** A reply/forward draft as createreply* / createforward returns it. */
+interface DraftReply {
+  Id?: string;
+  WebLink?: string;
+  Body?: { ContentType?: string; Content?: string };
+  ToRecipients?: Address[];
+  CcRecipients?: Address[];
+  BccRecipients?: Address[];
+}
+
 interface ReplyOriginal {
   Subject?: string;
   From?: Address;
@@ -1077,7 +1087,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     'outlook_reply',
     {
       description:
-        'Reply, reply-all or forward a message, with `comment` as your new text above the quoted original. Outlook picks the recipients for reply (the sender, or its Reply-To) and reply-all (sender plus the original To and Cc, minus you); a forward needs `to`. `draftOnly: true` leaves the reply in Drafts and returns its id, sending nothing and asking no confirmation; otherwise it is sent at once.' +
+        'Reply, reply-all or forward a message, with `comment` as your new text above the quoted original. Outlook picks the recipients for reply (the sender, or its Reply-To) and reply-all (sender plus the original To and Cc, minus you); a forward needs `to`. `cc` and `bcc` ADD people on top of those: on a reply-all the thread\'s existing Cc is kept and yours is appended, never replaced. `draftOnly: true` leaves the reply in Drafts and returns its id, sending nothing and asking no confirmation; otherwise it is sent at once, in this one call even with `cc`/`bcc` (no separate draft edit or send needed).' +
         ' ' +
         CONFIRM_FLOW_SENTENCE +
         ' The preview shows the recipients, subject and comment. ' +
@@ -1087,12 +1097,14 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ' ' +
         UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-      _meta: workMeta('send', { aliases: ['reply', 'reply all', 'forward'] }),
+      _meta: workMeta('send', { aliases: ['reply', 'reply all', 'forward', 'reply and cc'] }),
       inputSchema: z.object({
         messageId: z.string().min(1).describe('Id of the message to answer or forward'),
         mode: z.enum(['reply', 'replyAll', 'forward']).describe('reply (sender only), replyAll, or forward'),
         comment: z.string().describe('Your text, placed above the quoted original'),
         to: recipientList.describe('Forward recipients\' email addresses (forward only, required there)'),
+        cc: recipientList.describe('Extra Cc addresses, added to the ones Outlook keeps (reply-all keeps the thread\'s Cc)'),
+        bcc: recipientList.describe('Bcc addresses to add'),
         draftOnly: z
           .boolean()
           .optional()
@@ -1100,7 +1112,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ messageId, mode, comment, to, draftOnly, confirmToken }, ctx) => {
+    async ({ messageId, mode, comment, to, cc, bcc, draftOnly, confirmToken }, ctx) => {
       if (mode === 'forward' && !to?.length) {
         throw new McpToolError('A forward needs at least one recipient.', {
           hint: 'Pass `to` with the addresses to forward to.',
@@ -1108,28 +1120,48 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       }
       if (mode !== 'forward' && to?.length) {
         throw new McpToolError('`to` applies only to a forward.', {
-          hint: 'A reply goes where Outlook computes; use mode "forward" to send it somewhere else, or outlook_send_message.',
+          hint: 'A reply goes where Outlook computes; add people with `cc`/`bcc`, use mode "forward" to send it somewhere else, or outlook_send_message.',
         });
       }
       const { send, draft, prefix } = REPLY_MODES[mode];
       const base = `/me/messages/${encodeURIComponent(messageId)}`;
       const forwardTo = mode === 'forward' ? { ToRecipients: toRecipients(to) } : {};
+      const extraCc = cc ?? [];
+      const extraBcc = bcc ?? [];
+      // The reply/replyall/forward send endpoints take only a comment, so
+      // adding people means: draft it, add them to what Outlook filled in,
+      // then send that draft.
+      const adding = extraCc.length > 0 || extraBcc.length > 0;
+      // Outlook's own entries are kept as they are (with their display
+      // names); only addresses not already there are appended.
+      const merged = (have: Address[] | undefined, extra: string[]) => {
+        const seen = new Set(addresses(have).map((a) => a.toLowerCase()));
+        const out: Address[] = [...(have ?? [])];
+        for (const a of extra) {
+          if (seen.has(a.toLowerCase())) continue;
+          seen.add(a.toLowerCase());
+          out.push({ EmailAddress: { Address: a } });
+        }
+        return out;
+      };
+      const addedRecipients = (created: DraftReply) => ({
+        ...(extraCc.length ? { CcRecipients: merged(created.CcRecipients, extraCc) } : {}),
+        ...(extraBcc.length ? { BccRecipients: merged(created.BccRecipients, extraBcc) } : {}),
+      });
 
-      if (draftOnly === true) {
-        // Nothing leaves the mailbox: the draft sits in Drafts until sent from
-        // Outlook, so there is no one to protect with a confirmation.
+      /**
+       * Create the reply draft and write the comment (and any added
+       * recipients) into it. `ok: false` carries the result to return: the
+       * draft may exist, and then its id is in it so a retry does not leave
+       * a second one.
+       */
+      const buildDraft = async (
+        sending: boolean,
+      ): Promise<{ ok: true; created: DraftReply; after: DraftReply | undefined } | { ok: false; result: ReturnType<typeof minifiedResult> }> => {
         // The create is not idempotent: a retry after a lost answer leaves a
         // second draft, so an unconfirmed one says to look in Drafts first.
-        const create = await writeOrUnknown(
-          () =>
-            client.write<{ Id?: string; WebLink?: string; Body?: { ContentType?: string; Content?: string } }>(
-              'POST',
-              `${base}/${draft}`,
-              {},
-            ),
-          'Drafts',
-        );
-        if (!create.ok) return create.result;
+        const create = await writeOrUnknown(() => client.write<DraftReply>('POST', `${base}/${draft}`, {}), 'Drafts');
+        if (!create.ok) return create;
         const created = create.value;
         if (!created?.Id) {
           throw new McpToolError('Outlook did not return the draft it created.', {
@@ -1137,19 +1169,21 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           });
         }
         try {
-          await client.write('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
+          const after = await client.write<DraftReply | undefined>('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
             Body: bodyWithComment(created.Body, comment),
             ...forwardTo,
+            ...addedRecipients(created),
           });
+          return { ok: true, created, after };
         } catch (e) {
-          const what = `your comment${mode === 'forward' ? ' and recipients' : ''}`;
+          const what = `your comment${mode === 'forward' || adding ? ' and recipients' : ''}`;
           const reason = e instanceof Error ? e.message : String(e);
           // A rejected or missing credential is not about this draft: every
           // next call fails the same way, so it stays the tool error — with
           // the draft id in it, so a retry does not leave a second draft.
           if (isCredentialFailure(e)) {
             throw new McpToolError(
-              `The reply draft was created (draftId ${created.Id}) but adding ${what} failed: ${reason}`,
+              `The reply draft was created (draftId ${created.Id}) but adding ${what} failed${sending ? ', so nothing was sent' : ''}: ${reason}`,
               {
                 hint: `${e instanceof McpToolError && e.hint ? `${e.hint} ` : ''}Then edit draft ${created.Id} in Drafts, or delete it before trying again.`,
                 cause: e,
@@ -1165,15 +1199,26 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
             e instanceof WriteOutcomeUnknownError
               ? `The draft was created, and ${what} may have been applied: Outlook did not confirm the edit (${e.timedOut ? 'it did not answer in time' : 'the connection dropped'}). Check the draft in Drafts before editing it again or trying again.`
               : `The draft was created but adding ${what} failed (${reason}). Edit it in Drafts, or delete it before trying again.`;
-          return minifiedResult({
-            drafted: true,
-            mode,
-            draftId: created.Id,
-            WebLink: created.WebLink,
-            warning,
-          });
+          return {
+            ok: false,
+            result: minifiedResult({
+              drafted: true,
+              ...(sending ? { sent: false } : {}),
+              mode,
+              draftId: created.Id,
+              WebLink: created.WebLink,
+              warning: sending ? `Not sent. ${warning}` : warning,
+            }),
+          };
         }
-        return minifiedResult({ drafted: true, mode, draftId: created.Id, WebLink: created.WebLink });
+      };
+
+      if (draftOnly === true) {
+        // Nothing leaves the mailbox: the draft sits in Drafts until sent from
+        // Outlook, so there is no one to protect with a confirmation.
+        const built = await buildDraft(false);
+        if (!built.ok) return built.result;
+        return minifiedResult({ drafted: true, mode, draftId: built.created.Id, WebLink: built.created.WebLink });
       }
 
       // What Outlook will address the reply to, for the preview. The send
@@ -1182,16 +1227,22 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         query: { $select: 'Subject,From,ReplyTo,ToRecipients,CcRecipients' },
       });
       const sender = orig?.ReplyTo?.length ? orig.ReplyTo : orig?.From ? [orig.From] : [];
+      const added = toRecipients(extraCc);
       const recipients =
         mode === 'forward'
-          ? { to: to ?? [], cc: [] as string[] }
+          ? { to: to ?? [], cc: addresses(added) }
           : mode === 'replyAll'
-            ? { to: addresses(sender, orig?.ToRecipients), cc: addresses(orig?.CcRecipients) }
-            : { to: addresses(sender), cc: [] as string[] };
+            ? { to: addresses(sender, orig?.ToRecipients), cc: addresses(orig?.CcRecipients, added) }
+            : { to: addresses(sender), cc: addresses(added) };
+      const bccList = addresses(toRecipients(extraBcc));
       const subject = `${prefix}${orig?.Subject ?? ''}`;
       const path = `${base}/${send}`;
       const payload = { Comment: comment, ...forwardTo };
-      const everyone = [...recipients.to, ...recipients.cc.map((c) => `cc ${c}`)];
+      const everyone = [
+        ...recipients.to,
+        ...recipients.cc.map((c) => `cc ${c}`),
+        ...bccList.map((b) => `bcc ${b}`),
+      ];
       const who =
         everyone.length > MAX_RECIPIENTS
           ? `${everyone.slice(0, MAX_RECIPIENTS).join(', ')} and ${(everyone.length - MAX_RECIPIENTS).toLocaleString('en-US')} more`
@@ -1207,20 +1258,62 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         // One signed-in mailbox per server process.
         account: undefined,
         target: messageId,
-        request: { method: 'POST', path, body: payload },
+        // With added people the writes are draft → edit → send; the token is
+        // bound to the people added, so a preview without them cannot send with them.
+        request: adding
+          ? { method: 'POST', path: `${base}/${draft}`, body: { ...payload, addCc: extraCc, addBcc: extraBcc } }
+          : { method: 'POST', path, body: payload },
         confirmToken,
       });
       if (gate) return gate;
-      const sent = await writeOrUnknown(() => client.write('POST', path, payload), 'Sent Items');
+
+      if (!adding) {
+        const sent = await writeOrUnknown(() => client.write('POST', path, payload), 'Sent Items');
+        if (!sent.ok) return sent.result;
+        // Like sendmail, these return 202 with no body: nothing to re-read. The
+        // subject is the original sender's text, so it goes back fenced.
+        return mailboxUntrusted({
+          sent: true,
+          mode,
+          subject,
+          ...cappedRecipients('to', recipients.to),
+          ...cappedRecipients('cc', recipients.cc),
+        });
+      }
+
+      const built = await buildDraft(true);
+      if (!built.ok) return built.result;
+      const draftId = built.created.Id!;
+      const final = built.after && typeof built.after === 'object' && built.after.Id ? built.after : undefined;
+      if (final) {
+        // Send only what was confirmed: if Outlook's copy of the draft lacks
+        // someone who was added, stop with the draft left for review.
+        const have = new Set(addresses(final.CcRecipients, final.BccRecipients).map((a) => a.toLowerCase()));
+        const missing = [...extraCc, ...extraBcc].filter((a) => !have.has(a.toLowerCase()));
+        if (missing.length) {
+          return minifiedResult({
+            drafted: true,
+            sent: false,
+            mode,
+            draftId,
+            WebLink: built.created.WebLink,
+            warning: `Not sent: Outlook's draft does not include ${missing.join(', ')}. Check draft ${draftId} in Drafts, then send it with outlook_send_draft or delete it.`,
+          });
+        }
+      }
+      const sendPath = `/me/messages/${encodeURIComponent(draftId)}/send`;
+      const sent = await writeOrUnknown(() => client.write('POST', sendPath), 'Sent Items');
       if (!sent.ok) return sent.result;
-      // Like sendmail, these return 202 with no body: nothing to re-read. The
-      // subject is the original sender's text, so it goes back fenced.
+      const shownTo = final ? addresses(final.ToRecipients) : recipients.to;
+      const shownCc = final ? addresses(final.CcRecipients) : recipients.cc;
+      const shownBcc = final ? addresses(final.BccRecipients) : bccList;
       return mailboxUntrusted({
         sent: true,
         mode,
         subject,
-        ...cappedRecipients('to', recipients.to),
-        ...cappedRecipients('cc', recipients.cc),
+        ...cappedRecipients('to', shownTo),
+        ...cappedRecipients('cc', shownCc),
+        ...(shownBcc.length ? cappedRecipients('bcc', shownBcc) : {}),
       });
     },
   );
