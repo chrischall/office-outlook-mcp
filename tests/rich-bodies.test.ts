@@ -204,14 +204,16 @@ describe('reading Markdown or sanitised HTML', () => {
     await h.close();
   });
 
-  it('format "html" (and html:true) returns sanitised HTML; view "raw" stays untouched', async () => {
+  it('format "html" returns sanitised HTML; html:true keeps the raw HTML it always returned; view "raw" stays untouched', async () => {
     const { client } = readStub();
     const h = await mail(client);
     const clean =
       '<table><tr><td><p>Hi <b>Chris</b>,</p></td></tr><tr><td><ol><li>one</li><li>two</li></ol>' +
       '<p>See <a href="https://example.test/doc">the doc</a>.</p></td></tr></table>';
     expect(parseToolResult<Rec>(await h.callTool('outlook_get_message', { id: 'm1', format: 'html' })).Body).toBe(clean);
-    expect(parseToolResult<Rec>(await h.callTool('outlook_get_message', { id: 'm1', html: true })).Body).toBe(clean);
+    // html:true predates `format` and returned the sender's HTML as Outlook stores it; it still does.
+    expect(parseToolResult<Rec>(await h.callTool('outlook_get_message', { id: 'm1', html: true })).Body).toBe(MAIL_HTML);
+    expect(parseToolResult<Rec>(await h.callTool('outlook_get_message', { id: 'm1', html: true, format: 'html' })).Body).toBe(clean);
     const raw = parseToolResult<{ Body: { Content: string } }>(await h.callTool('outlook_get_message', { id: 'm1', format: 'markdown', view: 'raw' }));
     expect(raw.Body.Content).toBe(MAIL_HTML);
     await h.close();

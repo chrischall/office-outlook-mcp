@@ -396,9 +396,10 @@ a fresh preview.
   smaller than the HTML. `format: "markdown"` keeps the structure (lists,
   tables, emphasis, links with their text) at about the same size — on a live
   Jira notification, 5.2 KB of Markdown against 5.9 KB of plain text and
-  14.5 KB of HTML — and `format: "html"` (or `html: true`) returns sanitised
-  HTML. Both drop text the sender hid (`display:none` preheaders and the like).
-  `view: "raw"` is Outlook's untouched record. `outlook_list_unread_messages`
+  14.5 KB of HTML — and `format: "html"` returns sanitised HTML. Both drop
+  text the sender hid (`display:none` preheaders and the like). `html: true`
+  still returns the HTML exactly as Outlook stores it, and `view: "raw"` is
+  Outlook's untouched record. `outlook_list_unread_messages`
   takes `bodyFormat: "markdown"` too.
 - Writing, pass `format: "markdown"` to `outlook_send_message`,
   `outlook_create_draft`, `outlook_update_draft` or `outlook_reply`: the text
