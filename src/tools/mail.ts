@@ -40,7 +40,7 @@ import {
   type FromPosition,
 } from './_paging.js';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
-import { htmlAliasParam, readBody, readFormatParam, resolveFormat } from './_body.js';
+import { readBody, readFormatParam, resolveFormat } from './_body.js';
 
 /**
  * Well-known folder names the API accepts wherever a folder id is taken.
@@ -425,7 +425,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
     'outlook_get_message',
     {
       description:
-        'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); `format: "markdown"` keeps its structure (lists, tables, emphasis, links with their text) at about the same size, and `format: "html"` gives sanitised HTML. Hidden text in the HTML is dropped from both. Pass view:"raw" to get Outlook\'s untouched record. To and Cc list at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — view:"raw" returns every address.' +
+        'Get one message including its body. The body is requested as plain text rather than HTML (measured ~9x smaller and far easier to read); `format: "markdown"` keeps its structure (lists, tables, emphasis, links with their text) at about the same size, and `format: "html"` gives sanitised HTML. Hidden text in the HTML is dropped from both. `html: true` returns the HTML exactly as Outlook stores it. Pass view:"raw" to get Outlook\'s untouched record. To and Cc list at most 20 addresses; a longer list adds ToCount/ToTruncated (CcCount/CcTruncated) with the full count — view:"raw" returns every address.' +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: workMeta('lookup'),
@@ -433,17 +433,23 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
         view: viewParam(VIEWS),
         id: z.string().min(1).describe('Message Id from outlook_list_messages'),
         format: readFormatParam,
-        html: htmlAliasParam,
+        html: z
+          .boolean()
+          .optional()
+          .describe('Return the HTML body exactly as Outlook stores it, unsanitised (default false); format "html" gives it sanitised'),
       }),
     },
     async ({ view, id, format, html }) => {
       const bodyFormat = resolveFormat(format, html);
+      // html:true predates `format` and has always meant the sender's HTML as
+      // stored; only an explicit format "html" sanitises it.
+      const rawHtml = html === true && format === undefined;
       const data = await client.get<OutlookMessage>(`/me/messages/${encodeURIComponent(id)}`, {
         text: bodyFormat === 'text',
       });
       const v = resolveView(view, VIEWS);
       if (v === 'raw') return mailboxUntrusted(data);
-      if (data?.Body && bodyFormat !== 'text') {
+      if (data?.Body && bodyFormat !== 'text' && !rawHtml) {
         data.Body = { ...data.Body, Content: readBody(data.Body, bodyFormat) };
       }
       return mailboxUntrusted(v === 'full' ? fullMessage(data) : compactMessage(data));
