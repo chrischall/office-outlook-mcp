@@ -108,6 +108,14 @@ const lines = (path: string) =>
 const WINDOW = { since: '2026-03-01T00:00:00Z', until: '2026-04-01T00:00:00Z' };
 
 describe('outlook_export_events', () => {
+  it('writes event bodies as Markdown in a Markdown export, reading them as HTML', async () => {
+    const s = stub([{ ...ev(1), Body: { ContentType: 'HTML', Content: '<p>Agenda:</p><ol><li><b>budget</b></li></ol>' } }]);
+    const out = parseToolResult<Result>(await call(s.client, { ...WINDOW, format: 'markdown' }));
+    expect(s.calls.find((c) => c.path.includes('calendarview'))?.opts?.text).toBe(false);
+    const body = readFileSync(out.files.find((f) => f.path?.endsWith('.md'))!.path!, 'utf8');
+    expect(body).toContain('Agenda:\n\n1. **budget**');
+  });
+
   it('pages the calendar view in the mailbox zone and writes one full record per event', async () => {
     const s = stub();
     const out = parseToolResult<Result>(await call(s.client, WINDOW, { pageSize: 2 }));

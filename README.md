@@ -335,7 +335,8 @@ are, their sizes, the record and attachment counts, the date span, and
   your response, show-as, categories, the join link and the full plain-text
   body.
   `format: "markdown"` writes `part-0001.md`, a readable transcript (one
-  section per message or event), instead.
+  section per message or event), instead; its bodies are read as HTML and
+  converted to Markdown, so lists, tables, emphasis and links survive.
   `manifest.json` lists the counts and any errors, and the files: on disk
   every part's files (it is rewritten as each part finishes); in a blob zip
   the files in that zip.
@@ -392,7 +393,18 @@ a fresh preview.
 - Fields are **PascalCase** (`ReceivedDateTime`, `IsRead`). This is the Outlook
   REST API, not Graph — a Graph snippet silently returns nothing.
 - `outlook_get_message` returns a **plain-text** body by default, measured 9.4×
-  smaller than the HTML; pass `html: true` for the original.
+  smaller than the HTML. `format: "markdown"` keeps the structure (lists,
+  tables, emphasis, links with their text) at about the same size — on a live
+  Jira notification, 5.2 KB of Markdown against 5.9 KB of plain text and
+  14.5 KB of HTML — and `format: "html"` (or `html: true`) returns sanitised
+  HTML. Both drop text the sender hid (`display:none` preheaders and the like).
+  `view: "raw"` is Outlook's untouched record. `outlook_list_unread_messages`
+  takes `bodyFormat: "markdown"` too.
+- Writing, pass `format: "markdown"` to `outlook_send_message`,
+  `outlook_create_draft`, `outlook_update_draft` or `outlook_reply`: the text
+  is sent as formatted HTML (bold, lists, links, headings, quotes, code), and
+  is cheaper for an agent to write than HTML. Raw HTML in it is escaped. A
+  formatted reply is drafted, filled in and sent in the same one call.
 - `outlook_list_events` uses the calendar *view*, which expands recurring
   series. `/me/events` does not, which is why it is not exposed as-is.
 - Time zones are **Windows** names (`Eastern Standard Time`), not IANA.
