@@ -242,6 +242,36 @@ describe('outlook_batch', () => {
   });
 });
 
+describe('outlook_batch appends rules in order', () => {
+  // Found live 2026-11-12: two rules in one batch were both planned as
+  // "after the existing rules" and both sent Sequence 11.
+  it('gives each rule created in one batch its own next position', async () => {
+    const s = stub();
+    const h = await harness(s.client);
+    const ops = [
+      { tool: 'outlook_create_rule', args: { name: 'A', conditions: { from: ['a@example.com'] }, actions: { markAsRead: true } } },
+      { tool: 'outlook_create_rule', args: { name: 'B', conditions: { from: ['b@example.com'] }, actions: { markAsRead: true } } },
+    ];
+    const res = parseToolResult<BatchResult>(await confirmBatch(h, ops));
+    expect(res.status).toBe('ok');
+    const sequences = s.writes().filter((c) => c.path === RULES).map((c) => (c.body as Obj).Sequence);
+    expect(sequences).toEqual([1, 2]);
+    await h.close();
+  });
+
+  it('keeps a sequence the caller asked for', async () => {
+    const s = stub();
+    const h = await harness(s.client);
+    const ops = [
+      { tool: 'outlook_create_rule', args: { name: 'A', conditions: { from: ['a@example.com'] }, actions: { markAsRead: true }, sequence: 7 } },
+      { tool: 'outlook_create_rule', args: { name: 'B', conditions: { from: ['b@example.com'] }, actions: { markAsRead: true }, sequence: 7 } },
+    ];
+    await confirmBatch(h, ops);
+    expect(s.writes().filter((c) => c.path === RULES).map((c) => (c.body as Obj).Sequence)).toEqual([7, 7]);
+    await h.close();
+  });
+});
+
 describe('the converted writes stay single tools', () => {
   it('outlook_create_folder still creates without asking (nothing reaches anyone else)', async () => {
     const s = stub();
