@@ -6,6 +6,7 @@ import { registerMailTools } from './tools/mail.js';
 import { registerCalendarTools } from './tools/calendar.js';
 import { registerDirectoryTools } from './tools/directory.js';
 import { registerWriteTools } from './tools/writes.js';
+import { registerBulkTools } from './tools/bulk.js';
 import { registerHealthcheckTool } from './tools/healthcheck.js';
 import { registerExportTools } from './tools/export.js';
 import { registerRuleTools } from './tools/rules.js';
@@ -51,6 +52,7 @@ await runMcp({
     registerCalendarTools,
     registerDirectoryTools,
     registerWriteTools,
+    registerBulkTools,
     registerExportTools,
     registerRuleTools,
     registerFolderTools,

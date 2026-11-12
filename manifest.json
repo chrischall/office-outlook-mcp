@@ -250,6 +250,10 @@
       "description": "Move a message to another folder (asks you to confirm first)"
     },
     {
+      "name": "outlook_move_messages",
+      "description": "Move every message matching a filter (sender, age, read state, subject) to another folder, up to 5000 per call (asks you to confirm the whole set once)"
+    },
+    {
       "name": "outlook_create_event",
       "description": "Create a calendar event or Teams meeting (asks you to confirm first)"
     },
