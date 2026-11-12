@@ -338,7 +338,9 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
           done++;
           if (done % 25 === 0) await reportProgress(done, rows.length, `${done} of ${rows.length} moved`);
         }
-        if (!markRead || row.IsRead === true || !newId) return { kind: 'moved' };
+        if (!markRead || row.IsRead === true) return { kind: 'moved' };
+        // Moved, but Outlook returned no new id to mark read: say so rather than count it as done.
+        if (!newId) return { kind: 'moved', markReadFailed: true };
         try {
           await client.write('PATCH', `/me/messages/${encodeURIComponent(newId)}`, { IsRead: true });
           return { kind: 'moved', markedRead: true };

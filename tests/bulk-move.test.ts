@@ -40,6 +40,7 @@ function stub(
     patchFail?: string[];
     moveDelayMs?: number;
     onMove?: (n: number) => void;
+    moveNoId?: string[];
   } = {},
 ) {
   let folder = [...rows];
@@ -71,6 +72,7 @@ function stub(
       moves++;
       opts.onMove?.(moves);
       folder = folder.filter((r) => r.Id !== id);
+      if (opts.moveNoId?.includes(id)) return {};
       return { Id: `new-${id}`, ParentFolderId: (body as { DestinationId?: string }).DestinationId };
     }
     if (method === 'PATCH') {
@@ -412,6 +414,19 @@ describe('outlook_move_messages', () => {
     expect(res.moved).toBe(2);
     expect(res.markedRead).toBe(1);
     expect(res.markReadFailed).toBe(1);
+    await h.close();
+  });
+
+  it('counts a move that returned no new id as a mark-read failure, not as marked', async () => {
+    const s = stub([msg(1), msg(2)], { moveNoId: ['m-2'] });
+    const h = await harness(s.client);
+    const res = parseToolResult<Moved & { markReadFailed?: number }>(
+      await confirmed(h, { from: ['news@example.com'], destination: 'archive', markRead: true }),
+    );
+    expect(res.moved).toBe(2);
+    expect(res.markedRead).toBe(1);
+    expect(res.markReadFailed).toBe(1);
+    expect(s.patches()).toHaveLength(1);
     await h.close();
   });
 
