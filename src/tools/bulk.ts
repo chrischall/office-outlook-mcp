@@ -156,6 +156,25 @@ async function scan(
   return { rows, matched };
 }
 
+/**
+ * A folder's DisplayName for the preview and the result, so the user sees
+ * "Alerts" rather than a raw id. Well-known names ("inbox", "archive")
+ * resolve the same way. Any failure falls back to what was passed — the name
+ * is only for display, never for the move itself.
+ */
+async function folderName(client: OutlookClient, id: string): Promise<string> {
+  try {
+    const folder = await client.get<{ DisplayName?: string }>(`/me/mailfolders/${encodeURIComponent(id)}`, {
+      query: { $select: 'DisplayName' },
+    });
+    const name = folder?.DisplayName;
+    return typeof name === 'string' && name.trim() ? name : id;
+  } catch (e) {
+    if (isCredentialFailure(e)) throw e;
+    return id;
+  }
+}
+
 /** A short, stable digest of the ids that will move, bound into the token. */
 function idsDigest(ids: string[]): string {
   return createHash('sha256').update(ids.join('\n')).digest('base64url').slice(0, 22);
@@ -270,6 +289,10 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
         });
       }
 
+      const [sourceName, destinationName] = await Promise.all([
+        folderName(client, folder),
+        folderName(client, destination),
+      ]);
       const ids = rows.map((r) => r.Id);
       const beyondMax = matched - rows.length;
       const shownFilter = { folder, ...filter };
@@ -277,7 +300,7 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
         tool: 'outlook_move_messages',
         action: 'mail.bulk_move',
         message: 'Review and confirm this bulk move:',
-        summary: `Move ${rows.length} message${rows.length === 1 ? '' : 's'} from ${folder} to ${destination}${markRead ? ' and mark them read' : ''}`,
+        summary: `Move ${rows.length} message${rows.length === 1 ? '' : 's'} from ${sourceName} to ${destinationName}${markRead ? ' and mark them read' : ''}`,
         // One signed-in mailbox per server process.
         account: undefined,
         target: folder,
@@ -298,7 +321,10 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
               }
             : {}),
           filter: shownFilter,
-          destination,
+          source: sourceName,
+          sourceId: folder,
+          destination: destinationName,
+          destinationId: destination,
           markRead: markRead === true,
           sample: rows.slice(0, SAMPLE_SIZE).map((r) => ({
             from: r.From?.EmailAddress?.Address,
@@ -365,12 +391,13 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
               unknown: {
                 count: unknown.length,
                 ids: unknown.slice(0, LISTED_FAILURES).map((u) => u.id),
-                warning: unknownOutcome(unknown[0]!.error, `the ${destination} folder (outlook_list_messages)`).warning,
+                warning: unknownOutcome(unknown[0]!.error, `the ${destinationName} folder (outlook_list_messages)`).warning,
               },
             }
           : {}),
         remaining: beyondMax,
-        destination,
+        destination: destinationName,
+        destinationId: destination,
         ...(skipped
           ? {
               notAttempted: skipped,

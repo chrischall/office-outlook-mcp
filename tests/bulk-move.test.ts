@@ -41,6 +41,8 @@ function stub(
     moveDelayMs?: number;
     onMove?: (n: number) => void;
     moveNoId?: string[];
+    /** Folder id → DisplayName served by GET /me/mailfolders/{id}; others 404. */
+    folderNames?: Record<string, string>;
   } = {},
 ) {
   let folder = [...rows];
@@ -55,6 +57,12 @@ function stub(
   const get = vi.fn(async (path: string, o: { query?: Record<string, unknown> } = {}) => {
     calls.push({ method: 'GET', path, query: o.query });
     if (/^\/me\/mailfolders\/[^/]+\/messages$/.test(path)) return page(0);
+    const folderMatch = /^\/me\/mailfolders\/([^/]+)$/.exec(path);
+    if (folderMatch) {
+      const name = opts.folderNames?.[decodeURIComponent(folderMatch[1]!)];
+      if (name === undefined) throw new ApiError(404, 'Folder not found');
+      return { Id: `id-${folderMatch[1]}`, DisplayName: name };
+    }
     throw new Error(`unexpected GET ${path}`);
   });
   const getAbsolute = vi.fn(async (url: string) => {
@@ -107,6 +115,9 @@ type Preview = {
     willMove?: number;
     beyondMax?: number;
     destination?: string;
+    destinationId?: string;
+    source?: string;
+    sourceId?: string;
     markRead?: boolean;
     filter?: Record<string, unknown>;
     sample?: { from?: string; subject?: string; received?: string }[];
@@ -119,6 +130,7 @@ type Moved = {
   markedRead?: number;
   remaining: number;
   destination: string;
+  destinationId?: string;
   unknown?: { count: number; ids: string[]; warning: string };
   matched?: number;
 };
@@ -474,6 +486,54 @@ describe('outlook_move_messages', () => {
     await h.callTool('outlook_move_messages', { folder: 'Folder/1=', isRead: true, destination: 'archive' });
     expect(s.calls[0]?.path).toBe('/me/mailfolders/Folder%2F1%3D/messages');
     expect(s.firstQuery().$filter).toBe('IsRead eq true');
+    await h.close();
+  });
+  it('names the source and destination folders in the preview and the result', async () => {
+    const s = stub([msg(1), msg(2)], { folderNames: { inbox: 'Inbox', 'AAMk/alerts=': 'Alerts' } });
+    const h = await harness(s.client);
+    const args = { from: ['news@example.com'], destination: 'AAMk/alerts=' };
+    const first = parseToolResult<Preview>(await h.callTool('outlook_move_messages', args));
+    expect(first.preview?.action).toBe('Move 2 messages from Inbox to Alerts');
+    expect(first.preview?.destination).toBe('Alerts');
+    expect(first.preview?.destinationId).toBe('AAMk/alerts=');
+    expect(first.preview?.source).toBe('Inbox');
+    expect(first.preview?.sourceId).toBe('inbox');
+    // The lookup asks for the name only, by the encoded id.
+    const lookup = s.calls.find((c) => c.path === '/me/mailfolders/AAMk%2Falerts%3D');
+    expect(lookup?.query).toEqual({ $select: 'DisplayName' });
+    const res = parseToolResult<Moved>(
+      await h.callTool('outlook_move_messages', { ...args, confirmToken: first.confirmToken }),
+    );
+    expect(res.moved).toBe(2);
+    expect(res.destination).toBe('Alerts');
+    expect(res.destinationId).toBe('AAMk/alerts=');
+    // The move itself still targets the id.
+    expect(s.moves()[0]).toMatchObject({ body: { DestinationId: 'AAMk/alerts=' } });
+    await h.close();
+  });
+
+  it('resolves a well-known destination name the same way', async () => {
+    const s = stub([msg(1)], { folderNames: { inbox: 'Inbox', archive: 'Archive' } });
+    const h = await harness(s.client);
+    const first = parseToolResult<Preview>(
+      await h.callTool('outlook_move_messages', { isRead: false, destination: 'archive' }),
+    );
+    expect(first.preview?.action).toBe('Move 1 message from Inbox to Archive');
+    expect(first.preview?.destination).toBe('Archive');
+    expect(first.preview?.destinationId).toBe('archive');
+    await h.close();
+  });
+
+  it('falls back to the folder id when the name lookup fails', async () => {
+    const s = stub([msg(1)], { folderNames: { inbox: 'Inbox' } });
+    const h = await harness(s.client);
+    const first = parseToolResult<Preview>(
+      await h.callTool('outlook_move_messages', { isRead: false, destination: 'folder-xyz' }),
+    );
+    expect(first.status).toBe('confirmation-required');
+    expect(first.preview?.action).toBe('Move 1 message from Inbox to folder-xyz');
+    expect(first.preview?.destination).toBe('folder-xyz');
+    expect(first.preview?.destinationId).toBe('folder-xyz');
     await h.close();
   });
 });
