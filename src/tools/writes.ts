@@ -249,7 +249,8 @@ function bodyWithComment(
 /** Tool input → the `Flag.FlagStatus` Outlook stores. */
 const FLAG_STATUS = { flagged: 'Flagged', complete: 'Complete', none: 'NotFlagged' } as const;
 
-const messagePath = (id: string) => `/me/messages/${encodeURIComponent(id)}`;
+/** A message's REST path. */
+export const messagePath = (id: string) => `/me/messages/${encodeURIComponent(id)}`;
 
 /** Messages updated in parallel, bounded so a 50-id batch cannot burst. */
 const UPDATE_CONCURRENCY = 4;
@@ -412,7 +413,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       isRead: z.boolean().describe('true to mark read, false to mark unread'),
     }),
     plan: ({ id, isRead }) => {
-      const path = `/me/messages/${encodeURIComponent(id)}`;
+      const path = messagePath(id);
       const payload = { IsRead: isRead };
       return {
         gate: {
@@ -868,7 +869,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         // shows. An invite whose meeting is gone (already declined, cancelled
         // or deleted) is still an EventMessage, but expands an empty Event.
         const msg = await client.get<{ Event?: InviteEvent; MeetingMessageType?: string; '@odata.type'?: string }>(
-          `/me/messages/${encodeURIComponent(messageId)}`,
+          messagePath(messageId),
           { query: { $select: `Id,${MEETING_MESSAGE_TYPE}`, $expand: EVENT_EXPAND } },
         );
         event = resolvedEvent(msg?.Event);
@@ -1126,7 +1127,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         });
       }
       const { send, draft, prefix } = REPLY_MODES[mode];
-      const base = `/me/messages/${encodeURIComponent(messageId)}`;
+      const base = messagePath(messageId);
       const forwardTo = mode === 'forward' ? { ToRecipients: toRecipients(to) } : {};
       const extraCc = cc ?? [];
       const extraBcc = bcc ?? [];
@@ -1174,7 +1175,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           });
         }
         try {
-          const after = await client.write<DraftReply | undefined>('PATCH', `/me/messages/${encodeURIComponent(created.Id)}`, {
+          const after = await client.write<DraftReply | undefined>('PATCH', messagePath(created.Id), {
             Body: bodyWithComment(created.Body, comment, commentFormat),
             ...forwardTo,
             ...addedRecipients(created),
@@ -1307,7 +1308,7 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
           });
         }
       }
-      const sendPath = `/me/messages/${encodeURIComponent(draftId)}/send`;
+      const sendPath = `${messagePath(draftId)}/send`;
       const sent = await writeOrUnknown(() => client.write('POST', sendPath), 'Sent Items');
       if (!sent.ok) return sent.result;
       const shownTo = final ? addresses(final.ToRecipients) : recipients.to;

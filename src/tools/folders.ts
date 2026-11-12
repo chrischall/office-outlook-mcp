@@ -20,7 +20,8 @@ import { registerGatedWrite, registerUngatedWrite } from './_write.js';
 /** The mailbox's top level: the parent of Inbox, Archive and the folders beside them. */
 const ROOT = 'msgfolderroot';
 const RULES_PATH = '/me/MailFolders/inbox/MessageRules';
-const folderPath = (id: string) => `/me/mailfolders/${encodeURIComponent(id)}`;
+/** A mail folder's REST path, by id or well-known name. */
+export const folderPath = (id: string) => `/me/mailfolders/${encodeURIComponent(id)}`;
 
 const PROTECTED = new Set<string>([...WELL_KNOWN, ROOT]);
 const LIST_HINT = 'Pass a folder id from outlook_list_folders or a well-known name such as "inbox".';
