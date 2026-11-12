@@ -12,7 +12,7 @@ import {
 import type { OutlookClient } from '../client.js';
 import { workMeta } from './_hints.js';
 import { readBack, unverified } from './rules.js';
-import { recipientList, TIMEOUT_SENTENCE, toRecipients, writeOrUnknown } from './writes.js';
+import { messagePath, recipientList, TIMEOUT_SENTENCE, toRecipients, writeOrUnknown } from './writes.js';
 import { composeBody, htmlAliasParam, resolveFormat, writeFormatParam } from './_body.js';
 
 type Recipient = { EmailAddress?: { Address?: string } };
@@ -28,7 +28,6 @@ type Draft = {
 };
 
 const DRAFT_SELECT = 'Id,IsDraft,Subject,Body,ToRecipients,CcRecipients,BccRecipients,WebLink';
-const messagePath = (id: string) => `/me/messages/${encodeURIComponent(id)}`;
 
 /** The preview shows the body being replaced; past this it is cut, and says so. */
 const PREVIEW_BODY_MAX = 2000;

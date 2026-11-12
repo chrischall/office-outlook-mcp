@@ -156,9 +156,10 @@ describe('outlook_get_attachment', () => {
   });
 
   it('returns other binary types as metadata only, never fetching the bytes', async () => {
-    const s = stub({ '@odata.type': FILE, Id: 'a/1', Name: 'report.pdf', ContentType: 'application/pdf', Size: 1234, ContentBytes: b64('pdf') });
+    // (A PDF / Office file is fetched to convert it — tests/attachment-convert.test.ts.)
+    const s = stub({ '@odata.type': FILE, Id: 'a/1', Name: 'bundle.zip', ContentType: 'application/zip', Size: 1234, ContentBytes: b64('zip') });
     const out = parseToolResult<Out>(await call(s.client));
-    expect(out).toMatchObject({ name: 'report.pdf', contentType: 'application/pdf', size: 1234, inlined: false });
+    expect(out).toMatchObject({ name: 'bundle.zip', contentType: 'application/zip', size: 1234, inlined: false });
     expect(out).not.toHaveProperty('contentBytes');
     expect(out).not.toHaveProperty('text');
     expect(out.hint).toMatch(/not inlined/i);
@@ -269,9 +270,9 @@ describe('outlook_get_attachment — file delivery', () => {
       expect(out.path).toBe(join(home, 'Downloads', 'office-outlook-mcp', 'report.pdf'));
     });
 
-    it('with no download directory, answers as before: metadata only, bytes never fetched', async () => {
+    it('with no download directory and convert "none", answers as before: metadata only, bytes never fetched', async () => {
       const s = pdf();
-      const out = parseToolResult<Out>(await call(s.client));
+      const out = parseToolResult<Out>(await call(s.client, { messageId: 'm 1', attachmentId: 'a/1', convert: 'none' }));
       expect(out).toMatchObject({ inlined: false });
       expect(out).not.toHaveProperty('via');
       expect(out.hint).toMatch(/OUTLOOK_OUTPUT_DIR/);
@@ -357,10 +358,12 @@ describe('outlook_get_attachment — file delivery', () => {
   });
 
   describe('hosted without a blob store', () => {
-    it('refuses clearly, never fetching the bytes and never writing disk', async () => {
+    it('refuses clearly (convert "none"), never fetching the bytes and never writing disk', async () => {
       mkdirSync(join(home, 'Downloads'));
       const s = pdf();
-      const out = parseToolResult<Out>(await call(s.client, undefined, { MCP_DATA_DIR: join(home, 'data'), HOME: home }));
+      const out = parseToolResult<Out>(
+        await call(s.client, { messageId: 'm 1', attachmentId: 'a/1', convert: 'none' }, { MCP_DATA_DIR: join(home, 'data'), HOME: home }),
+      );
       expect(out).toMatchObject({ name: 'report.pdf', inlined: false });
       expect(out).not.toHaveProperty('via');
       expect(out.hint).toMatch(/blob store/i);

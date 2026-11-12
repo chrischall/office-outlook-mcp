@@ -249,10 +249,19 @@ export function registerRuleTools(server: McpServer, client: OutlookClient): voi
           target: name,
           request: { method: 'POST', path: RULES_PATH, body: payload },
         },
-        state: payload,
+        state: { payload, append: sequence === undefined },
       };
     },
-    execute: async (payload) => {
+    execute: async ({ payload: planned, append }) => {
+      // "After the existing rules" is re-read now: in an outlook_batch every op
+      // is planned before any runs, so two appended rules would otherwise share
+      // one Sequence (seen live 2026-11-12). A sequence the caller set is kept.
+      let payload = planned;
+      if (append) {
+        const now = await client.get<Page>(RULES_PATH);
+        const next = Math.max(0, ...(now.value ?? []).map((r) => r.Sequence ?? 0)) + 1;
+        if (next > planned.Sequence) payload = { ...planned, Sequence: next };
+      }
       const write = await writeOrUnknownData(() => client.write<Rule>('POST', RULES_PATH, payload), 'outlook_list_rules');
       if (!write.ok) return write.result;
       const made = write.value;

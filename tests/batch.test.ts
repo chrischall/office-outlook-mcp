@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
-import { ApiError } from '@chrischall/mcp-utils';
+import { ApiError, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerWriteTools } from '../src/tools/writes.js';
 import { registerRuleTools } from '../src/tools/rules.js';
@@ -19,7 +19,7 @@ type Obj = Record<string, unknown>;
 const RULES = '/me/MailFolders/inbox/MessageRules';
 const ALIASES: Record<string, string> = { msgfolderroot: 'root-id', inbox: 'inbox-id', archive: 'archive-id' };
 
-function stub(opts: { failRuleCreate?: boolean } = {}) {
+function stub(opts: { failRuleCreate?: boolean; folderCreateUnknown?: boolean } = {}) {
   const folders: Obj[] = [
     { Id: 'root-id', DisplayName: 'Top', ParentFolderId: 'store' },
     { Id: 'inbox-id', DisplayName: 'Inbox', ParentFolderId: 'root-id' },
@@ -52,6 +52,7 @@ function stub(opts: { failRuleCreate?: boolean } = {}) {
     calls.push({ method, path, body });
     const b = (body ?? {}) as Obj;
     if (method === 'POST' && path.endsWith('/childfolders')) {
+      if (opts.folderCreateUnknown) throw new WriteOutcomeUnknownError('Outlook', 'POST', { timeoutMs: 60_000 });
       const parent = folders.find((x) => x.Id === resolve(seg(path, 3)));
       if (!parent) throw new ApiError(404, 'Outlook 404: ErrorItemNotFound');
       const made = { Id: `folder-${++n}`, DisplayName: b.DisplayName, ParentFolderId: parent.Id };
@@ -180,6 +181,21 @@ describe('outlook_batch', () => {
     await h.close();
   });
 
+  it('fails an op whose ref needs the id of a folder create that came back "unknown"', async () => {
+    const s = stub({ folderCreateUnknown: true });
+    const h = await harness(s.client);
+    const res = await confirmBatch(h, FOLDER_THEN_RULE);
+    expect(res.isError).toBe(true);
+    const out = parseToolResult<BatchResult>(res);
+    // The create is not a failure (it may have happened), but it produced no id to feed on.
+    expect(out.results[0]).toMatchObject({ tool: 'outlook_create_folder', applied: true, result: { status: 'unknown' } });
+    expect(out.results[1]).toMatchObject({ tool: 'outlook_create_rule', applied: false });
+    expect(out.results[1].error).toMatch(/did not return a folder Id/);
+    // The rule was never sent with a guessed folder.
+    expect(s.writes().map((w) => w.path)).toEqual(['/me/mailfolders/msgfolderroot/childfolders']);
+    await h.close();
+  });
+
   it('refuses a send: only mailbox writes are batchable', async () => {
     const s = stub();
     const h = await harness(s.client);
@@ -238,6 +254,36 @@ describe('outlook_batch', () => {
       expect(d, name).not.toContain(`${name},`);
       expect(d, name).not.toMatch(new RegExp(`${name}\\.`));
     }
+    await h.close();
+  });
+});
+
+describe('outlook_batch appends rules in order', () => {
+  // Found live 2026-11-12: two rules in one batch were both planned as
+  // "after the existing rules" and both sent Sequence 11.
+  it('gives each rule created in one batch its own next position', async () => {
+    const s = stub();
+    const h = await harness(s.client);
+    const ops = [
+      { tool: 'outlook_create_rule', args: { name: 'A', conditions: { from: ['a@example.com'] }, actions: { markAsRead: true } } },
+      { tool: 'outlook_create_rule', args: { name: 'B', conditions: { from: ['b@example.com'] }, actions: { markAsRead: true } } },
+    ];
+    const res = parseToolResult<BatchResult>(await confirmBatch(h, ops));
+    expect(res.status).toBe('ok');
+    const sequences = s.writes().filter((c) => c.path === RULES).map((c) => (c.body as Obj).Sequence);
+    expect(sequences).toEqual([1, 2]);
+    await h.close();
+  });
+
+  it('keeps a sequence the caller asked for', async () => {
+    const s = stub();
+    const h = await harness(s.client);
+    const ops = [
+      { tool: 'outlook_create_rule', args: { name: 'A', conditions: { from: ['a@example.com'] }, actions: { markAsRead: true }, sequence: 7 } },
+      { tool: 'outlook_create_rule', args: { name: 'B', conditions: { from: ['b@example.com'] }, actions: { markAsRead: true }, sequence: 7 } },
+    ];
+    await confirmBatch(h, ops);
+    expect(s.writes().filter((c) => c.path === RULES).map((c) => (c.body as Obj).Sequence)).toEqual([7, 7]);
     await h.close();
   });
 });

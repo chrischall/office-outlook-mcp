@@ -184,8 +184,10 @@ folder (default the inbox) that matches a filter — sender addresses (`from`),
 `exceptSubjectContains` — to another folder, under one confirmation for the
 whole set. It only moves, never deletes. At least one condition is required. The
 preview shows how many match, the filter, the destination and a sample of 10; it
-moves at most `max` per call (default 1000, at most 5000) and reports the rest as
-`remaining`, so a second call moves the next set. To run an inbox rule over mail
+moves at most `max` per call (default 1000, at most 5000), newest first, and
+reports the rest as `remaining`, so a second call moves the next set. Each call
+reads every matching message in the folder so `remaining` is exact, which takes
+longer in a very large folder. To run an inbox rule over mail
 that arrived before it, pass the rule's senders as `from`, its exceptions as
 `exceptSubjectContains`, and `markRead: true` if the rule marks mail read. Every
 call lists the folder afresh: if the matching mail changed before you approved,
@@ -455,6 +457,29 @@ including an `outlook_create_folder`, which on its own does not ask.
   `OUTLOOK_OUTPUT_DIR` (else `~/Downloads/office-outlook-mcp`) on a local
   install. A hosted server never writes to its own disk; nobody in your
   session could open the path.
+- `outlook_get_attachment` also **converts** a PDF, Excel workbook
+  (`.xlsx`/`.xlsm`) or PowerPoint deck (`.pptx`) so the model can read it —
+  hosted clients cannot open a download link themselves. `convert` picks how:
+  - `auto` (default): PDF → Markdown (`## Page N`), plus page images when the
+    PDF has little text (a scan); Excel → one CSV per sheet; PowerPoint →
+    per-slide Markdown (titles, bullets, tables, speaker notes) plus the
+    pictures embedded in each slide.
+  - `text`: PDF → Markdown only. `images`: PDF → page images only (workbooks
+    and decks convert as `auto`).
+  - `none`: no conversion — the file itself, as before.
+
+  The converted content is the sender's text, so each Markdown or CSV part is
+  its own untrusted-content envelope (`{ untrusted_content, note, part,
+  mimeType, truncated?, text }`); images follow as image blocks. The metadata
+  block closes the result with `converted: { format, count, parts, notes }`.
+  The original is still handed over as a link or saved file, never inlined as
+  well; if that hand-over fails, the converted content is still returned with
+  `deliveryError`. Conversion reads files up to the 50 MB download
+  cap (the 5 MB inline cap does not apply) and caps output at 200 KiB of text
+  and 8 MiB of images. A corrupt file falls back to the plain answer with
+  `conversion_error`. PDF page images need the native `@napi-rs/canvas`, which
+  `npx` installs; the `.mcpb` bundle ships without it, so there a scanned PDF
+  gets its text plus a note that page images are unavailable.
 
 ## Upgrading
 
@@ -471,6 +496,19 @@ delivered:
   anyone holding it can download until it expires.
 - `path`: local, where the file was saved.
 - `deliveryNote`: why that route was chosen, when it was not the obvious one.
+
+A PDF, Excel or PowerPoint attachment is now also **converted** to Markdown,
+CSV or images (`convert`, default `auto`; `none` restores the old answer). The
+result then has several content blocks — a leading envelope, one envelope per
+converted text part (the text is in its `text` field), any images, and the
+metadata block last — rather than one. Such a file is downloaded to
+convert even where the original cannot be handed over.
+
+`outlook_move_messages` now names folders: the preview and result (including a
+"nothing matches" result) show `destination` (and the preview `source`) as the
+folder's display name, with the id in `destinationId` / `sourceId`. It now lists
+the folder newest first, so which `max` messages move is the same in the preview
+and the confirmed call.
 
 A local install with a `~/Downloads` folder (or `OUTLOOK_OUTPUT_DIR` set) now
 **saves** such attachments to disk instead of returning metadata only. Without
