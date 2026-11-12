@@ -9,6 +9,8 @@ import { registerRuleTools } from '../src/tools/rules.js';
 import { registerFolderTools } from '../src/tools/folders.js';
 import { registerDraftTools } from '../src/tools/drafts.js';
 import { registerCopilotTools } from '../src/tools/copilot.js';
+import { registerBatchTools } from '../src/tools/batch.js';
+import { registerBulkTools } from '../src/tools/bulk.js';
 import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
 
@@ -44,12 +46,14 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerFolderTools(server, client);
   registerDraftTools(server, client);
   registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
+  registerBulkTools(server, client);
+  registerBatchTools(server, client);
   return seen;
 }
 
 describe('tool annotations', () => {
   it('covers the full surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(41);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(44);
   });
 
   it('follows the list/get naming rule: the renamed tools have no aliases', () => {
@@ -105,6 +109,7 @@ describe('tool annotations', () => {
     // Self-inverse: mark_read(isRead: !x) and move_message back to the old folder.
     expect(destructive('outlook_mark_read')).toBe(false);
     expect(destructive('outlook_move_message')).toBe(false);
+    expect(destructive('outlook_move_messages')).toBe(false);
     // Flag, categories and read state can each be set back to what they were.
     expect(destructive('outlook_update_message')).toBe(false);
     // A response can be changed by responding again; nothing is deleted.

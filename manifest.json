@@ -250,6 +250,10 @@
       "description": "Move a message to another folder (asks you to confirm first)"
     },
     {
+      "name": "outlook_move_messages",
+      "description": "Move every message matching a filter (sender, age, read state, subject) to another folder, up to 5000 per call (asks you to confirm the whole set once)"
+    },
+    {
       "name": "outlook_create_event",
       "description": "Create a calendar event or Teams meeting (asks you to confirm first)"
     },
@@ -312,6 +316,14 @@
     {
       "name": "outlook_export_events",
       "description": "Bulk-export calendar events in a date window (recurrences expanded, attachments optional) to JSONL or Markdown files; returns only a manifest"
+    },
+    {
+      "name": "outlook_batch",
+      "description": "Several mailbox writes (moves, read state, flags, rules, folders) under one preview and one approval, in order; no rollback (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_confirm",
+      "description": "Confirm a previewed write with its confirmToken alone, without repeating the arguments"
     },
     {
       "name": "outlook_healthcheck",

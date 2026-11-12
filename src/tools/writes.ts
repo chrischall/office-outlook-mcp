@@ -5,6 +5,7 @@ import {
   CONFIRM_INJECTION_RULE,
   confirmTokenParam,
   confirmWrite,
+  defineWrite,
   errorKindOf,
   errorStatusOf,
   mapWithConcurrency,
@@ -16,6 +17,7 @@ import {
 } from '@chrischall/mcp-utils';
 import { isCredentialFailure, type OutlookClient } from '../client.js';
 import { workMeta } from './_hints.js';
+import { registerGatedWrite } from './_write.js';
 import { mailboxTimeZone } from '../timezone.js';
 import { cappedRecipients, MAX_RECIPIENTS } from '../view.js';
 import {
@@ -136,12 +138,20 @@ export const TIMEOUT_SENTENCE =
  * still throws.
  */
 export function writeOrUnknown<T>(run: () => Promise<T>, checkWhere: string) {
-  return runWriteOrUnknown(run, (e) =>
-    minifiedResult({
-      status: 'unknown',
-      warning: `Outlook did not confirm this write (${unknownOutcomeReason(e)}), so it may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
-    }),
-  );
+  return runWriteOrUnknown(run, (e) => minifiedResult(unknownOutcome(e, checkWhere)));
+}
+
+/** The "unknown" outcome as data, for a write whose result is rendered later (a batchable write). */
+export function unknownOutcome(e: WriteOutcomeUnknownError, checkWhere: string) {
+  return {
+    status: 'unknown' as const,
+    warning: `Outlook did not confirm this write (${unknownOutcomeReason(e)}), so it may already have happened. Check ${checkWhere} before retrying; do not resend blindly.`,
+  };
+}
+
+/** {@link writeOrUnknown}, with the "unknown" outcome left as data rather than a tool result. */
+export function writeOrUnknownData<T>(run: () => Promise<T>, checkWhere: string) {
+  return runWriteOrUnknown(run, (e) => unknownOutcome(e, checkWhere));
 }
 
 const INVITE_EVENT_SELECT = 'Id,Subject,IsOrganizer,IsCancelled,Start,End,Organizer,ResponseStatus';
@@ -238,6 +248,8 @@ function bodyWithComment(
 
 /** Tool input → the `Flag.FlagStatus` Outlook stores. */
 const FLAG_STATUS = { flagged: 'Flagged', complete: 'Complete', none: 'NotFlagged' } as const;
+
+const messagePath = (id: string) => `/me/messages/${encodeURIComponent(id)}`;
 
 /** Messages updated in parallel, bounded so a 50-id batch cannot burst. */
 const UPDATE_CONCURRENCY = 4;
@@ -390,71 +402,62 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
     },
   );
 
-  server.registerTool(
-    'outlook_mark_read',
-    {
-      description:
-        'Mark a message read or unread. The result is verified by re-reading the message — a 2xx alone is not proof it persisted.' +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      _meta: workMeta('change'),
-      inputSchema: z.object({
-        id: z.string().min(1).describe('Message Id'),
-        isRead: z.boolean().describe('true to mark read, false to mark unread'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ id, isRead, confirmToken }, ctx) => {
+  registerGatedWrite(server, workMeta('change'), defineWrite({
+    name: 'outlook_mark_read',
+    description:
+      'Mark a message read or unread. The result is verified by re-reading the message — a 2xx alone is not proof it persisted.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    inputSchema: z.object({
+      id: z.string().min(1).describe('Message Id'),
+      isRead: z.boolean().describe('true to mark read, false to mark unread'),
+    }),
+    plan: ({ id, isRead }) => {
       const path = `/me/messages/${encodeURIComponent(id)}`;
       const payload = { IsRead: isRead };
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_mark_read',
-        action: 'mail.mark_read',
-        message: 'Review and confirm this change:',
-        summary: `Mark message ${id} as ${isRead ? 'read' : 'unread'}`,
-        // One signed-in mailbox per server process.
-        account: undefined,
-        target: id,
-        request: { method: 'PATCH', path: path, body: payload },
-        confirmToken,
-      });
-      if (gate) return gate;
+      return {
+        gate: {
+          action: 'mail.mark_read',
+          message: 'Review and confirm this change:',
+          summary: `Mark message ${id} as ${isRead ? 'read' : 'unread'}`,
+          // One signed-in mailbox per server process.
+          account: undefined,
+          target: id,
+          request: { method: 'PATCH', path: path, body: payload },
+        },
+        state: { path, payload, isRead },
+      };
+    },
+    execute: async ({ path, payload, isRead }) => {
       await client.write('PATCH', path, payload);
       // Re-read rather than trust the status. IsRead is the field the write
       // requested, so it is the field that proves it.
       const after = await client.get<{ IsRead?: boolean }>(`${path}?$select=IsRead`);
-      return minifiedResult({
+      return {
         updated: after?.IsRead === isRead,
         IsRead: after?.IsRead,
         ...(after?.IsRead === isRead ? {} : { warning: 'Outlook accepted the write but the value did not change.' }),
-      });
+      };
     },
-  );
+    render: minifiedResult,
+  }));
 
-  server.registerTool(
-    'outlook_update_message',
-    {
-      description:
-        'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_list_unread_messages → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Duplicate ids are collapsed, so each message is written once. Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest, but a rejected or missing credential fails the whole call. Only your mailbox changes — nobody is notified.' +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['flag', 'categorize'] }),
-      inputSchema: z.object({
-        messageIds: z.array(z.string().min(1)).min(1).max(50).describe('Message Ids (1 to 50)'),
-        flag: z.enum(['flagged', 'complete', 'none']).optional().describe('Follow-up flag to set'),
-        categories: z
-          .array(z.string().min(1))
-          .optional()
-          .describe('Replace the categories with exactly these ([] clears them)'),
-        addCategories: z.array(z.string().min(1)).optional().describe('Categories to add'),
-        removeCategories: z.array(z.string().min(1)).optional().describe('Categories to remove'),
-        isRead: z.boolean().optional().describe('true to mark read, false to mark unread'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ messageIds, flag, categories, addCategories, removeCategories, isRead, confirmToken }, ctx) => {
+  registerGatedWrite(server, workMeta('change', { aliases: ['flag', 'categorize'] }), defineWrite({
+    name: 'outlook_update_message',
+    description:
+      'Flag, categorise and/or mark read up to 50 messages at once — the filing step of the triage loop (outlook_list_unread_messages → act → update). `flag`: "flagged", "complete" or "none". `categories` replaces a message\'s categories; `addCategories`/`removeCategories` edit each message\'s current list instead (names from outlook_list_categories). Duplicate ids are collapsed, so each message is written once. Each id gets its own result `{ id, ok, error? }`, verified against what Outlook stored; one failure does not stop the rest, but a rejected or missing credential fails the whole call. Only your mailbox changes — nobody is notified.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    inputSchema: z.object({
+      messageIds: z.array(z.string().min(1)).min(1).max(50).describe('Message Ids (1 to 50)'),
+      flag: z.enum(['flagged', 'complete', 'none']).optional().describe('Follow-up flag to set'),
+      categories: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Replace the categories with exactly these ([] clears them)'),
+      addCategories: z.array(z.string().min(1)).optional().describe('Categories to add'),
+      removeCategories: z.array(z.string().min(1)).optional().describe('Categories to remove'),
+      isRead: z.boolean().optional().describe('true to mark read, false to mark unread'),
+    }),
+    plan: ({ messageIds, flag, categories, addCategories, removeCategories, isRead }) => {
       const add = addCategories ?? [];
       const remove = removeCategories ?? [];
       const editing = add.length > 0 || remove.length > 0;
@@ -477,7 +480,6 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
       }
 
       const ids = [...new Set(messageIds)];
-      const pathOf = (id: string) => `/me/messages/${encodeURIComponent(id)}`;
       const changes = [
         ...(flag ? [`flag ${flag}`] : []),
         ...(isRead !== undefined ? [isRead ? 'mark read' : 'mark unread'] : []),
@@ -485,40 +487,41 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         ...(add.length ? [`add categories [${add.join(', ')}]`] : []),
         ...(remove.length ? [`remove categories [${remove.join(', ')}]`] : []),
       ];
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_update_message',
-        action: 'mail.update',
-        message: 'Review and confirm this change:',
-        summary: `Update ${ids.length} message${ids.length === 1 ? '' : 's'}: ${changes.join('; ')}`,
-        // One signed-in mailbox per server process.
-        account: undefined,
-        target: ids.join(','),
-        request: {
-          method: 'PATCH',
-          path: ids.length === 1 ? pathOf(ids[0]) : '/me/messages/{id}',
-          body: editing
-            ? { ...fixed, Categories: `(each message's current categories${add.length ? ` + ${add.join(', ')}` : ''}${remove.length ? ` - ${remove.join(', ')}` : ''})` }
-            : fixed,
+      return {
+        gate: {
+          action: 'mail.update',
+          message: 'Review and confirm this change:',
+          summary: `Update ${ids.length} message${ids.length === 1 ? '' : 's'}: ${changes.join('; ')}`,
+          // One signed-in mailbox per server process.
+          account: undefined,
+          target: ids.join(','),
+          request: {
+            method: 'PATCH',
+            path: ids.length === 1 ? messagePath(ids[0]) : '/me/messages/{id}',
+            body: editing
+              ? { ...fixed, Categories: `(each message's current categories${add.length ? ` + ${add.join(', ')}` : ''}${remove.length ? ` - ${remove.join(', ')}` : ''})` }
+              : fixed,
+          },
         },
-        confirmToken,
-      });
-      if (gate) return gate;
-
+        state: { ids, fixed, editing, add, remove },
+      };
+    },
+    execute: async ({ ids, fixed, editing, add, remove }) => {
       const results = await mapWithConcurrency(ids, UPDATE_CONCURRENCY, async (id) => {
         try {
           const payload: MessageState = { ...fixed };
           if (editing) {
             // PATCH replaces the whole list, so build it from the current one.
-            const current = await client.get<MessageState>(`${pathOf(id)}?$select=Categories`);
+            const current = await client.get<MessageState>(`${messagePath(id)}?$select=Categories`);
             payload.Categories = editCategories(current?.Categories, add, remove);
           }
-          const echoed = await client.write<MessageState | undefined>('PATCH', pathOf(id), payload);
+          const echoed = await client.write<MessageState | undefined>('PATCH', messagePath(id), payload);
           // Outlook answers a PATCH with the updated message; check that rather
           // than trust the 2xx, and re-read only when it came back without one.
           const after =
             echoed && typeof echoed === 'object'
               ? echoed
-              : ((await client.get<MessageState>(`${pathOf(id)}?$select=IsRead,Flag,Categories`)) ?? {});
+              : ((await client.get<MessageState>(`${messagePath(id)}?$select=IsRead,Flag,Categories`)) ?? {});
           const unchanged = unchangedFields(payload, after);
           return unchanged.length
             ? { id, ok: false, error: `Outlook accepted the write but these did not change: ${unchanged.join(', ')}.` }
@@ -531,56 +534,51 @@ export function registerWriteTools(server: McpServer, client: OutlookClient): vo
         }
       });
       const updated = results.filter((r) => r.ok).length;
-      return minifiedResult({ updated, failed: results.length - updated, results });
+      return { updated, failed: results.length - updated, results };
     },
-  );
+    render: minifiedResult,
+  }));
 
-  server.registerTool(
-    'outlook_move_message',
-    {
-      description:
-        'Move a message to another folder (e.g. "archive", "deleteditems", or a folder id from outlook_list_folders). Moving assigns a NEW message id, which is returned.' +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['file', 'archive'] }),
-      inputSchema: z.object({
-        id: z.string().min(1).describe('Message Id'),
-        destination: z
-          .string()
-          .min(1)
-          .describe('Destination folder id or well-known name (e.g. "archive")'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ id, destination, confirmToken }, ctx) => {
-      const path = `/me/messages/${encodeURIComponent(id)}/move`;
+  registerGatedWrite(server, workMeta('change', { aliases: ['file', 'archive'] }), defineWrite({
+    name: 'outlook_move_message',
+    description:
+      'Move a message to another folder (e.g. "archive", "deleteditems", or a folder id from outlook_list_folders). Moving assigns a NEW message id, which is returned.',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    inputSchema: z.object({
+      id: z.string().min(1).describe('Message Id'),
+      destination: z
+        .string()
+        .min(1)
+        .describe('Destination folder id or well-known name (e.g. "archive")'),
+    }),
+    plan: ({ id, destination }) => {
+      const path = `${messagePath(id)}/move`;
       const payload = { DestinationId: destination };
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_move_message',
-        action: 'mail.move',
-        message: 'Review and confirm this move:',
-        summary: `Move message ${id} to ${destination}`,
-        // One signed-in mailbox per server process.
-        account: undefined,
-        target: id,
-        request: { method: 'POST', path: path, body: payload },
-        confirmToken,
-      });
-      if (gate) return gate;
-      const moved = await client.write<{ Id?: string; ParentFolderId?: string }>(
-        'POST',
-        path,
-        payload,
-      );
-      return minifiedResult({
+      return {
+        gate: {
+          action: 'mail.move',
+          message: 'Review and confirm this move:',
+          summary: `Move message ${id} to ${destination}`,
+          // One signed-in mailbox per server process.
+          account: undefined,
+          target: id,
+          request: { method: 'POST', path: path, body: payload },
+        },
+        state: { path, payload },
+      };
+    },
+    execute: async ({ path, payload }) => {
+      const moved = await client.write<{ Id?: string; ParentFolderId?: string }>('POST', path, payload);
+      return {
         moved: true,
         newId: moved?.Id,
         ParentFolderId: moved?.ParentFolderId,
         note: 'The message has a new Id after a move; the old one no longer resolves.',
-      });
+      };
     },
-  );
+    render: minifiedResult,
+    produces: { newId: (r: { newId?: string }) => r.newId },
+  }));
 
   server.registerTool(
     'outlook_create_event',

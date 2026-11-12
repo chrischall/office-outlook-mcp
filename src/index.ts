@@ -6,12 +6,14 @@ import { registerMailTools } from './tools/mail.js';
 import { registerCalendarTools } from './tools/calendar.js';
 import { registerDirectoryTools } from './tools/directory.js';
 import { registerWriteTools } from './tools/writes.js';
+import { registerBulkTools } from './tools/bulk.js';
 import { registerHealthcheckTool } from './tools/healthcheck.js';
 import { registerExportTools } from './tools/export.js';
 import { registerRuleTools } from './tools/rules.js';
 import { registerFolderTools } from './tools/folders.js';
 import { registerDraftTools } from './tools/drafts.js';
 import { registerCopilotTools } from './tools/copilot.js';
+import { registerBatchTools } from './tools/batch.js';
 import { CopilotClient } from './copilot/client.js';
 
 loadDotenvSafely();
@@ -50,11 +52,14 @@ await runMcp({
     registerCalendarTools,
     registerDirectoryTools,
     registerWriteTools,
+    registerBulkTools,
     registerExportTools,
     registerRuleTools,
     registerFolderTools,
     registerDraftTools,
     (server) => registerCopilotTools(server, copilot, client),
     registerHealthcheckTool,
+    // Last: outlook_batch lists the batchable writes registered before it.
+    registerBatchTools,
   ],
 });

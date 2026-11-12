@@ -15,6 +15,8 @@ import { registerRuleTools } from '../src/tools/rules.js';
 import { registerFolderTools } from '../src/tools/folders.js';
 import { registerDraftTools } from '../src/tools/drafts.js';
 import { registerCopilotTools } from '../src/tools/copilot.js';
+import { registerBatchTools } from '../src/tools/batch.js';
+import { registerBulkTools } from '../src/tools/bulk.js';
 import type { CopilotClient } from '../src/copilot/client.js';
 import type { OutlookClient } from '../src/client.js';
 
@@ -275,6 +277,8 @@ async function registeredTools(): Promise<{ name: string; description?: string }
     registerFolderTools(server, client);
     registerDraftTools(server, client);
     registerCopilotTools(server, {} as CopilotClient, {} as OutlookClient);
+    registerBulkTools(server, client);
+    registerBatchTools(server, client);
   });
   const tools = await h.listTools();
   await h.close();

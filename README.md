@@ -135,7 +135,7 @@ Everything is optional — with nothing set, the server captures from the browse
 
 **Write** (ask you to confirm first — see [Confirmations](#confirmations)) —
 `outlook_send_message`, `outlook_create_draft`, `outlook_update_draft`, `outlook_send_draft`, `outlook_mark_read`,
-`outlook_update_message`, `outlook_move_message`, `outlook_create_event`,
+`outlook_update_message`, `outlook_move_message`, `outlook_move_messages`, `outlook_batch`, `outlook_confirm`, `outlook_create_event`,
 `outlook_update_event`, `outlook_respond_to_invite`, `outlook_delete_event`,
 `outlook_reply`, `outlook_create_rule`, `outlook_update_rule`,
 `outlook_delete_rule`, `outlook_set_auto_reply`, `outlook_create_folder`,
@@ -177,6 +177,34 @@ or `actions` replace that whole group. `outlook_set_auto_reply` changes only
 what you pass, and its confirmation shows the exact text that will go out,
 including stored text you did not change. Read the current auto-reply with
 `outlook_get_mailbox_settings`.
+
+**Moving many messages** — `outlook_move_messages` moves every message in a
+folder (default the inbox) that matches a filter — sender addresses (`from`),
+`receivedBefore` / `receivedAfter`, `isRead`, `subjectContains`, minus
+`exceptSubjectContains` — to another folder, under one confirmation for the
+whole set. It only moves, never deletes. At least one condition is required. The
+preview shows how many match, the filter, the destination and a sample of 10; it
+moves at most `max` per call (default 1000, at most 5000) and reports the rest as
+`remaining`, so a second call moves the next set. To run an inbox rule over mail
+that arrived before it, pass the rule's senders as `from`, its exceptions as
+`exceptSubjectContains`, and `markRead: true` if the rule marks mail read. Every
+call lists the folder afresh: if the matching mail changed before you approved,
+you get a new preview instead of a move. One failed message does not stop the
+rest; the result counts `moved`, `failedCount` (first 20 listed), `markedRead`
+and any `unknown` (timed out — may have moved; check before retrying).
+
+**Several changes at once** — `outlook_batch` runs up to 100 mailbox writes
+(`outlook_move_message`, `outlook_mark_read`, `outlook_update_message`,
+`outlook_create_rule`, `outlook_update_rule`, `outlook_delete_rule`,
+`outlook_create_folder`, `outlook_update_folder`) under one preview and one
+approval, in order. An op can take an earlier op's output through `refs`: create
+a folder, then a rule that files into it with
+`{"tool": "outlook_create_rule", "args": {…}, "refs": {"moveToFolder": "0.id"}}`.
+It stops at the first failure and has no rollback — the result says which ops
+were applied, which failed and which never ran. Nothing that emails anyone
+(sends, replies, invites, events, drafts, automatic replies) can ride in a batch.
+`outlook_confirm` finishes any previewed write with its `confirmToken` alone, so
+the arguments need not be sent twice.
 
 **Export** — `outlook_export_messages` (mail) and `outlook_export_events`
 (calendar) write JSONL or Markdown files, optionally with attachments, and
@@ -281,7 +309,8 @@ An agent can work through new mail end to end without opening Outlook:
    - an attachment to read: `outlook_get_attachment`.
 3. **File it** — `outlook_update_message` flags, categorises (names from
    `outlook_list_categories`) and marks read up to 50 messages in one call;
-   `outlook_move_message` moves one to another folder.
+   `outlook_move_message` moves one to another folder, and
+   `outlook_move_messages` moves every message matching a filter at once.
 4. **Mark it handled** — `outlook_mark_read` (or `isRead: true` on
    `outlook_update_message`) on the plain mail you handled, so the next
    `outlook_list_unread_messages` returns only what is still new. Answered invites are
@@ -379,7 +408,9 @@ cannot, the first call does nothing and returns a `confirmation-required`
 preview plus a `confirmToken`; only a repeat call with that token performs the
 write. The token is single-use, expires, and is bound to the exact arguments —
 change anything between the two calls and it is refused (`DRAFT_CHANGED`) with
-a fresh preview.
+a fresh preview. Instead of repeating the call, the token alone can go to
+`outlook_confirm`. `outlook_batch` asks once for its whole list of writes —
+including an `outlook_create_folder`, which on its own does not ask.
 
 | variable | default | |
 |---|---|---|

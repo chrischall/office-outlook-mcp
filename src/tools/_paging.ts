@@ -106,11 +106,11 @@ const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d
  * token. Milliseconds are dropped only when zero — truncating a real fraction
  * would widen `ge` to messages older than the position and repeat them.
  */
-function utcLiteral(ms: number): string {
+export function utcLiteral(ms: number): string {
   return new Date(ms).toISOString().replace(/\.000Z$/, 'Z');
 }
 
-function parseTime(raw: string): number | undefined {
+export function parseTime(raw: string): number | undefined {
   if (!ISO_DATE_TIME.test(raw)) return undefined;
   // A date-time with no zone would parse as LOCAL time; `from` is UTC, so it is pinned there.
   // (A bare date already parses as UTC.)
