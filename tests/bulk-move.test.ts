@@ -164,14 +164,23 @@ describe('buildMoveFilter', () => {
         isRead: true,
       }),
     ).toBe(
-      "(From/EmailAddress/Address eq 'a@example.com' or From/EmailAddress/Address eq 'b@example.com')" +
-        ' and ReceivedDateTime lt 2026-08-01T00:00:00Z and ReceivedDateTime ge 2026-01-01T00:00:00Z and IsRead eq true',
+      'ReceivedDateTime lt 2026-08-01T00:00:00Z and ReceivedDateTime ge 2026-01-01T00:00:00Z' +
+        " and (From/EmailAddress/Address eq 'a@example.com' or From/EmailAddress/Address eq 'b@example.com')" +
+        ' and IsRead eq true',
+    );
+  });
+
+  // Outlook rejects a $filter that does not lead with the $orderby property ("InefficientFilter").
+  it('leads with a ReceivedDateTime bound, adding an open one when no date was given', () => {
+    expect(buildMoveFilter({ isRead: true })).toBe('ReceivedDateTime ge 1970-01-01T00:00:00Z and IsRead eq true');
+    expect(buildMoveFilter({ receivedAfter: '2026-01-01', isRead: true })).toBe(
+      'ReceivedDateTime ge 2026-01-01T00:00:00Z and IsRead eq true',
     );
   });
 
   it("escapes a quote in an address by doubling it", () => {
     expect(buildMoveFilter({ from: ["o'brien@example.com"] })).toBe(
-      "(From/EmailAddress/Address eq 'o''brien@example.com')",
+      "ReceivedDateTime ge 1970-01-01T00:00:00Z and (From/EmailAddress/Address eq 'o''brien@example.com')",
     );
   });
 
@@ -229,7 +238,9 @@ describe('outlook_move_messages', () => {
     expect(s.moves()).toHaveLength(0);
     // The listing asked Outlook to do the sender filtering, with a narrow $select.
     const q = s.firstQuery();
-    expect(q.$filter).toBe("(From/EmailAddress/Address eq 'News@Example.com')");
+    expect(q.$filter).toBe("ReceivedDateTime ge 1970-01-01T00:00:00Z and (From/EmailAddress/Address eq 'News@Example.com')");
+    // Newest first, so the preview and the confirmed call pick the same `max` messages.
+    expect(q.$orderby).toBe('ReceivedDateTime desc');
     expect(q.$select).toBe('Id,Subject,From,ReceivedDateTime,IsRead');
     expect(q.$top).toBe(100);
     expect(s.calls[0]?.path).toBe('/me/mailfolders/inbox/messages');
@@ -269,6 +280,7 @@ describe('outlook_move_messages', () => {
     expect(first.preview?.sample?.map((x) => x.subject)).toEqual(['Your INVOICE for June', 'Receipt #42']);
     // No server-side condition: the folder is listed with no $filter at all.
     expect(s.firstQuery().$filter).toBeUndefined();
+    expect(s.firstQuery().$orderby).toBe('ReceivedDateTime desc');
     const res = parseToolResult<Moved>(
       await h.callTool('outlook_move_messages', { ...args, confirmToken: first.confirmToken }),
     );
@@ -351,6 +363,37 @@ describe('outlook_move_messages', () => {
     );
     expect(elsewhere.error).toBe('DRAFT_CHANGED');
     expect(s.moves()).toHaveLength(0);
+    await h.close();
+  });
+
+  it('binds the filter and max into the token', async () => {
+    const s = stub([msg(1, { IsRead: true })]);
+    const h = await harness(s.client);
+    const args = { from: ['news@example.com'], destination: 'archive' };
+    const first = parseToolResult<Preview>(await h.callTool('outlook_move_messages', args));
+    // Each matches the same single message, so only the bound arguments differ.
+    for (const other of [
+      { ...args, isRead: true },
+      { ...args, receivedAfter: '2026-01-01' },
+      { ...args, exceptSubjectContains: ['keep'] },
+      { ...args, max: 1 },
+    ]) {
+      const res = parseToolResult<Preview>(
+        await h.callTool('outlook_move_messages', { ...other, confirmToken: first.confirmToken }),
+      );
+      expect(res.error, JSON.stringify(other)).toBe('DRAFT_CHANGED');
+    }
+    expect(s.moves()).toHaveLength(0);
+    await h.close();
+  });
+
+  it('moves a message Outlook lists twice (on two pages) only once', async () => {
+    const rows = [msg(1), msg(2), msg(1), msg(3)];
+    const s = stub(rows, { pageSize: 2 });
+    const h = await harness(s.client);
+    const res = parseToolResult<Moved>(await confirmed(h, { from: ['news@example.com'], destination: 'archive' }));
+    expect(res.moved).toBe(3);
+    expect(s.moves().map((c) => c.path)).toEqual(['/me/messages/m-1/move', '/me/messages/m-2/move', '/me/messages/m-3/move']);
     await h.close();
   });
 
@@ -454,6 +497,17 @@ describe('outlook_move_messages', () => {
     await h.close();
   });
 
+  it('names the destination folder in a "nothing matches" result too', async () => {
+    const s = stub([msg(1)], { folderNames: { 'AAMk/alerts=': 'Alerts' } });
+    const h = await harness(s.client);
+    const res = parseToolResult<Moved>(
+      await h.callTool('outlook_move_messages', { from: ['nobody@example.com'], destination: 'AAMk/alerts=' }),
+    );
+    expect(res.destination).toBe('Alerts');
+    expect(res.destinationId).toBe('AAMk/alerts=');
+    await h.close();
+  });
+
   it('stops starting new moves once the caller cancels', async () => {
     const rows = Array.from({ length: 40 }, (_, i) => msg(i));
     const controller = new AbortController();
@@ -485,7 +539,7 @@ describe('outlook_move_messages', () => {
     const h = await harness(s.client);
     await h.callTool('outlook_move_messages', { folder: 'Folder/1=', isRead: true, destination: 'archive' });
     expect(s.calls[0]?.path).toBe('/me/mailfolders/Folder%2F1%3D/messages');
-    expect(s.firstQuery().$filter).toBe('IsRead eq true');
+    expect(s.firstQuery().$filter).toBe('ReceivedDateTime ge 1970-01-01T00:00:00Z and IsRead eq true');
     await h.close();
   });
   it('names the source and destination folders in the preview and the result', async () => {

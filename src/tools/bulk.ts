@@ -32,7 +32,8 @@ import {
 import { isCredentialFailure, type OutlookClient, type QueryParams } from '../client.js';
 import { workMeta } from './_hints.js';
 import { parseTime, utcLiteral } from './_paging.js';
-import { unknownOutcome, TIMEOUT_SENTENCE } from './writes.js';
+import { folderPath } from './folders.js';
+import { messagePath, unknownOutcome, TIMEOUT_SENTENCE } from './writes.js';
 
 /** How many messages one call moves unless told otherwise. */
 export const BULK_MOVE_DEFAULT_MAX = 1000;
@@ -49,6 +50,10 @@ const LISTED_FAILURES = 20;
 /** The longest subject shown in the preview or a failure. */
 const SUBJECT_MAX = 120;
 const SELECT = 'Id,Subject,From,ReceivedDateTime,IsRead';
+/** The listing order: newest first, so the preview and the confirmed call pick the same `max` messages. */
+const ORDER_BY = 'ReceivedDateTime desc';
+/** The open lower bound a filter with no date leads with (see {@link buildMoveFilter}). */
+const EPOCH = '1970-01-01T00:00:00Z';
 
 /** The conditions a message must meet to be moved. */
 export interface MoveFilter {
@@ -85,21 +90,27 @@ function dateLiteral(name: string, raw: string): string {
 }
 
 /**
- * The `$filter` for what Outlook can evaluate itself: senders (OR-joined),
- * the received-time window (`receivedAfter` inclusive, `receivedBefore`
- * exclusive) and read state, AND-joined. The subject conditions are not here
+ * The `$filter` for what Outlook can evaluate itself: the received-time
+ * window (`receivedAfter` inclusive, `receivedBefore` exclusive), senders
+ * (OR-joined) and read state, AND-joined. The subject conditions are not here
  * — they are applied to each listed row — so a subject-only filter lists the
  * whole folder (`undefined`).
+ *
+ * Outlook rejects a `$filter` that does not lead with the `$orderby` property
+ * ("InefficientFilter"), so the date conditions come first, and a filter with
+ * no date leads with an open `ReceivedDateTime ge 1970-01-01T00:00:00Z`.
  */
 export function buildMoveFilter(f: MoveFilter): string | undefined {
-  const parts: string[] = [];
+  const dates: string[] = [];
+  if (f.receivedBefore !== undefined) dates.push(`ReceivedDateTime lt ${dateLiteral('receivedBefore', f.receivedBefore)}`);
+  if (f.receivedAfter !== undefined) dates.push(`ReceivedDateTime ge ${dateLiteral('receivedAfter', f.receivedAfter)}`);
+  const rest: string[] = [];
   if (f.from?.length) {
-    parts.push(`(${f.from.map((a) => `From/EmailAddress/Address eq ${odataString(a)}`).join(' or ')})`);
+    rest.push(`(${f.from.map((a) => `From/EmailAddress/Address eq ${odataString(a)}`).join(' or ')})`);
   }
-  if (f.receivedBefore !== undefined) parts.push(`ReceivedDateTime lt ${dateLiteral('receivedBefore', f.receivedBefore)}`);
-  if (f.receivedAfter !== undefined) parts.push(`ReceivedDateTime ge ${dateLiteral('receivedAfter', f.receivedAfter)}`);
-  if (f.isRead !== undefined) parts.push(`IsRead eq ${f.isRead}`);
-  return parts.length ? parts.join(' and ') : undefined;
+  if (f.isRead !== undefined) rest.push(`IsRead eq ${f.isRead}`);
+  if (!dates.length && !rest.length) return undefined;
+  return [...(dates.length ? dates : [`ReceivedDateTime ge ${EPOCH}`]), ...rest].join(' and ');
 }
 
 /**
@@ -122,9 +133,13 @@ const clip = (s: string | undefined) =>
   s === undefined ? undefined : s.length > SUBJECT_MAX ? `${s.slice(0, SUBJECT_MAX - 1)}…` : s;
 
 /**
- * List the folder with the server-side filter, follow every nextLink, and
- * keep the first `max` matching rows while counting all of them — so the
- * preview can say how many lie beyond `max`. Reads only.
+ * List the folder newest first with the server-side filter, follow every
+ * nextLink, and keep the first `max` matching rows while counting all of them
+ * — so the preview can say how many lie beyond `max`. Reads only.
+ *
+ * Only the ids kept are remembered (to skip a row Outlook lists twice), so
+ * memory stays bounded by `max` however large the folder; past `max` rows are
+ * only counted.
  */
 async function scan(
   client: OutlookClient,
@@ -133,20 +148,20 @@ async function scan(
   max: number,
 ): Promise<{ rows: (Row & { Id: string })[]; matched: number }> {
   const filter = buildMoveFilter(f);
-  const query: QueryParams = { $filter: filter, $select: SELECT, $top: PAGE_SIZE };
+  const query: QueryParams = { $filter: filter, $orderby: ORDER_BY, $select: SELECT, $top: PAGE_SIZE };
   type Page = { value?: Row[]; '@odata.nextLink'?: string };
-  let page: Page | undefined = await client.get<Page>(`/me/mailfolders/${encodeURIComponent(folder)}/messages`, {
-    query,
-  });
+  let page: Page | undefined = await client.get<Page>(`${folderPath(folder)}/messages`, { query });
   const rows: (Row & { Id: string })[] = [];
-  const seen = new Set<string>();
+  const kept = new Set<string>();
   let matched = 0;
   for (;;) {
     for (const row of page?.value ?? []) {
-      if (typeof row.Id !== 'string' || seen.has(row.Id) || !rowMatches(row, f)) continue;
-      seen.add(row.Id);
+      if (typeof row.Id !== 'string' || kept.has(row.Id) || !rowMatches(row, f)) continue;
       matched++;
-      if (rows.length < max) rows.push(row as Row & { Id: string });
+      if (rows.length < max) {
+        kept.add(row.Id);
+        rows.push(row as Row & { Id: string });
+      }
     }
     const next: string | undefined = page?.['@odata.nextLink'];
     if (!next) break;
@@ -164,9 +179,7 @@ async function scan(
  */
 async function folderName(client: OutlookClient, id: string): Promise<string> {
   try {
-    const folder = await client.get<{ DisplayName?: string }>(`/me/mailfolders/${encodeURIComponent(id)}`, {
-      query: { $select: 'DisplayName' },
-    });
+    const folder = await client.get<{ DisplayName?: string }>(folderPath(id), { query: { $select: 'DisplayName' } });
     const name = folder?.DisplayName;
     return typeof name === 'string' && name.trim() ? name : id;
   } catch (e) {
@@ -191,7 +204,8 @@ const DESCRIPTION =
   'Reversible: it only moves, never deletes. ' +
   'Filter by any of `from` (sender addresses, exact, ignoring case), `receivedBefore` / `receivedAfter` (ISO 8601; before is exclusive, after inclusive), `isRead`, and `subjectContains` (any of); at least one is required, so an unfiltered "move everything" is refused. `exceptSubjectContains` (none of) narrows further. ' +
   'To run an inbox rule over mail that arrived before it existed, pass the rule\'s sender list as `from`, its exceptions as `exceptSubjectContains`, its folder as `destination`, and `markRead: true` if the rule marks mail read. ' +
-  `It moves at most \`max\` messages per call (default ${BULK_MOVE_DEFAULT_MAX}, at most ${BULK_MOVE_HARD_MAX}); when more match, the preview says so, the result reports \`remaining\`, and calling again moves the next set. ` +
+  `It moves at most \`max\` messages per call (default ${BULK_MOVE_DEFAULT_MAX}, at most ${BULK_MOVE_HARD_MAX}), newest first; when more match, the preview says so, the result reports \`remaining\`, and calling again moves the next set. ` +
+  'Each call reads every matching message in the folder (so `remaining` is exact), which takes longer in a very large folder. ' +
   'The preview shows the number matched, the filter, the destination and a sample of 10. Every call lists the folder afresh, so if the matching mail changed before approval the result is a new preview to approve rather than a move. ' +
   'One failed message does not stop the rest: the result reports `moved`, `failedCount` with the first 20 failures, `markedRead`, `remaining` and `unknown`. Moved messages get NEW ids. ' +
   CONFIRM_FLOW_SENTENCE +
@@ -284,7 +298,8 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
         return minifiedResult({
           moved: 0,
           matched: 0,
-          destination,
+          destination: await folderName(client, destination),
+          destinationId: destination,
           note: 'Nothing in the folder matches; nothing was moved.',
         });
       }
@@ -349,11 +364,9 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
         }
         let newId: string | undefined;
         try {
-          const moved = await client.write<{ Id?: string }>(
-            'POST',
-            `/me/messages/${encodeURIComponent(row.Id)}/move`,
-            { DestinationId: destination },
-          );
+          const moved = await client.write<{ Id?: string }>('POST', `${messagePath(row.Id)}/move`, {
+            DestinationId: destination,
+          });
           newId = moved?.Id;
         } catch (e) {
           // Sent, but no answer: it may well have moved. Never retried.
@@ -368,7 +381,7 @@ export function registerBulkTools(server: McpServer, client: OutlookClient): voi
         // Moved, but Outlook returned no new id to mark read: say so rather than count it as done.
         if (!newId) return { kind: 'moved', markReadFailed: true };
         try {
-          await client.write('PATCH', `/me/messages/${encodeURIComponent(newId)}`, { IsRead: true });
+          await client.write('PATCH', messagePath(newId), { IsRead: true });
           return { kind: 'moved', markedRead: true };
         } catch {
           return { kind: 'moved', markReadFailed: true };

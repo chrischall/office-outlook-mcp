@@ -184,8 +184,10 @@ folder (default the inbox) that matches a filter — sender addresses (`from`),
 `exceptSubjectContains` — to another folder, under one confirmation for the
 whole set. It only moves, never deletes. At least one condition is required. The
 preview shows how many match, the filter, the destination and a sample of 10; it
-moves at most `max` per call (default 1000, at most 5000) and reports the rest as
-`remaining`, so a second call moves the next set. To run an inbox rule over mail
+moves at most `max` per call (default 1000, at most 5000), newest first, and
+reports the rest as `remaining`, so a second call moves the next set. Each call
+reads every matching message in the folder so `remaining` is exact, which takes
+longer in a very large folder. To run an inbox rule over mail
 that arrived before it, pass the rule's senders as `from`, its exceptions as
 `exceptSubjectContains`, and `markRead: true` if the rule marks mail read. Every
 call lists the folder afresh: if the matching mail changed before you approved,
@@ -502,9 +504,11 @@ converted text part (the text is in its `text` field), any images, and the
 metadata block last — rather than one. Such a file is downloaded to
 convert even where the original cannot be handed over.
 
-`outlook_move_messages` now names folders: the preview and result show
-`destination` (and the preview `source`) as the folder's display name, with the
-id in `destinationId` / `sourceId`.
+`outlook_move_messages` now names folders: the preview and result (including a
+"nothing matches" result) show `destination` (and the preview `source`) as the
+folder's display name, with the id in `destinationId` / `sourceId`. It now lists
+the folder newest first, so which `max` messages move is the same in the preview
+and the confirmed call.
 
 A local install with a `~/Downloads` folder (or `OUTLOOK_OUTPUT_DIR` set) now
 **saves** such attachments to disk instead of returning metadata only. Without
