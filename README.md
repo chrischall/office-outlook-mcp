@@ -178,6 +178,19 @@ what you pass, and its confirmation shows the exact text that will go out,
 including stored text you did not change. Read the current auto-reply with
 `outlook_get_mailbox_settings`.
 
+**Several changes at once** — `outlook_batch` runs up to 100 mailbox writes
+(`outlook_move_message`, `outlook_mark_read`, `outlook_update_message`,
+`outlook_create_rule`, `outlook_update_rule`, `outlook_delete_rule`,
+`outlook_create_folder`, `outlook_update_folder`) under one preview and one
+approval, in order. An op can take an earlier op's output through `refs`: create
+a folder, then a rule that files into it with
+`{"tool": "outlook_create_rule", "args": {…}, "refs": {"moveToFolder": "0.id"}}`.
+It stops at the first failure and has no rollback — the result says which ops
+were applied, which failed and which never ran. Nothing that emails anyone
+(sends, replies, invites, events, drafts, automatic replies) can ride in a batch.
+`outlook_confirm` finishes any previewed write with its `confirmToken` alone, so
+the arguments need not be sent twice.
+
 **Export** — `outlook_export_messages` (mail) and `outlook_export_events`
 (calendar) write JSONL or Markdown files, optionally with attachments, and
 return only where they are; see [Bulk export](#bulk-export).
@@ -379,7 +392,9 @@ cannot, the first call does nothing and returns a `confirmation-required`
 preview plus a `confirmToken`; only a repeat call with that token performs the
 write. The token is single-use, expires, and is bound to the exact arguments —
 change anything between the two calls and it is refused (`DRAFT_CHANGED`) with
-a fresh preview.
+a fresh preview. Instead of repeating the call, the token alone can go to
+`outlook_confirm`. `outlook_batch` asks once for its whole list of writes —
+including an `outlook_create_folder`, which on its own does not ask.
 
 | variable | default | |
 |---|---|---|

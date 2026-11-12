@@ -4,6 +4,7 @@ import {
   CONFIRM_FLOW_SENTENCE,
   confirmTokenParam,
   confirmWrite,
+  defineWrite,
   errorStatusOf,
   McpToolError,
   minifiedResult,
@@ -15,7 +16,8 @@ import { mailboxTimeZone } from '../timezone.js';
 import { stripOData, VIEWS } from '../view.js';
 import { workMeta } from './_hints.js';
 import { fetchPage, nextLinkParam, plainCollection } from './_paging.js';
-import { dateTimeTimeZone, TIMEOUT_SENTENCE, writeOrUnknown } from './writes.js';
+import { dateTimeTimeZone, TIMEOUT_SENTENCE, writeOrUnknown, writeOrUnknownData } from './writes.js';
+import { registerGatedWrite } from './_write.js';
 
 const RULES_PATH = '/me/MailFolders/inbox/MessageRules';
 const SETTINGS_PATH = '/me/MailboxSettings';
@@ -116,6 +118,29 @@ async function outlookActions(client: OutlookClient, a: ActionArgs): Promise<Rec
   });
 }
 
+/**
+ * `actions.moveToFolder`, also taken at the top level so an `outlook_batch` op
+ * can be fed a folder an earlier op created (`refs` name top-level arguments
+ * only): `{"moveToFolder": "0.id"}` after `outlook_create_folder`.
+ */
+const TOP_LEVEL_MOVE = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Same as actions.moveToFolder (pass one or the other). At the top level so an outlook_batch op can take it from an earlier outlook_create_folder: refs {"moveToFolder": "0.id"}.',
+  );
+
+function withMoveToFolder(actions: ActionArgs, moveToFolder: string | undefined): ActionArgs {
+  if (moveToFolder === undefined) return actions;
+  if (actions.moveToFolder !== undefined) {
+    throw new McpToolError('`moveToFolder` is given twice: at the top level and in `actions`.', {
+      hint: 'Pass it in one place only.',
+    });
+  }
+  return { ...actions, moveToFolder };
+}
+
 function requireSome(group: string, value: Record<string, unknown>): void {
   if (Object.keys(defined(value)).length === 0) {
     throw new McpToolError(`\`${group}\` needs at least one entry.`, {
@@ -185,29 +210,25 @@ export function registerRuleTools(server: McpServer, client: OutlookClient): voi
     },
   );
 
-  server.registerTool(
-    'outlook_create_rule',
-    {
-      description:
-        'Create an inbox rule, which runs on new mail from then on. Needs at least one condition and one action; added after existing rules unless `sequence` is set. The result is verified by re-reading the rule.' +
-        FORWARDING_RULE +
-        ' ' +
-        TIMEOUT_SENTENCE +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['add rule', 'mail filter'] }),
-      inputSchema: z.object({
-        name: z.string().min(1).describe('Rule name'),
-        conditions: conditionFields.describe('Which messages it applies to'),
-        exceptions: conditionFields.optional().describe('Messages it skips'),
-        actions: actionFields.describe('What it does to them'),
-        enabled: z.boolean().optional().describe('Whether it runs (default true)'),
-        sequence: z.number().int().min(1).optional().describe('Position among the rules (lower runs first)'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ name, conditions, exceptions, actions, enabled, sequence, confirmToken }, ctx) => {
+  registerGatedWrite(server, workMeta('change', { aliases: ['add rule', 'mail filter'] }), defineWrite({
+    name: 'outlook_create_rule',
+    description:
+      'Create an inbox rule, which runs on new mail from then on. Needs at least one condition and one action; added after existing rules unless `sequence` is set. The result is verified by re-reading the rule.' +
+      FORWARDING_RULE +
+      ' ' +
+      TIMEOUT_SENTENCE,
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    inputSchema: z.object({
+      name: z.string().min(1).describe('Rule name'),
+      conditions: conditionFields.describe('Which messages it applies to'),
+      exceptions: conditionFields.optional().describe('Messages it skips'),
+      actions: actionFields.describe('What it does to them'),
+      moveToFolder: TOP_LEVEL_MOVE,
+      enabled: z.boolean().optional().describe('Whether it runs (default true)'),
+      sequence: z.number().int().min(1).optional().describe('Position among the rules (lower runs first)'),
+    }),
+    plan: async ({ name, conditions, exceptions, actions: given, moveToFolder, enabled, sequence }) => {
+      const actions = withMoveToFolder(given, moveToFolder);
       requireSome('conditions', conditions);
       requireSome('actions', actions);
       const existing = sequence === undefined ? await client.get<Page>(RULES_PATH) : undefined;
@@ -219,56 +240,49 @@ export function registerRuleTools(server: McpServer, client: OutlookClient): voi
         ...(exceptions ? { Exceptions: outlookConditions(exceptions) } : {}),
         Actions: await outlookActions(client, actions),
       };
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_create_rule',
-        action: 'mail.rule_create',
-        message: `Review and confirm this new inbox rule:${forwardingWarning(actions)}`,
-        summary: `Create inbox rule "${name}".${forwardingWarning(actions)}`,
-        account: undefined,
-        target: name,
-        request: { method: 'POST', path: RULES_PATH, body: payload },
-        confirmToken,
-      });
-      if (gate) return gate;
-      const write = await writeOrUnknown(() => client.write<Rule>('POST', RULES_PATH, payload), 'outlook_list_rules');
+      return {
+        gate: {
+          action: 'mail.rule_create',
+          message: `Review and confirm this new inbox rule:${forwardingWarning(actions)}`,
+          summary: `Create inbox rule "${name}".${forwardingWarning(actions)}`,
+          account: undefined,
+          target: name,
+          request: { method: 'POST', path: RULES_PATH, body: payload },
+        },
+        state: payload,
+      };
+    },
+    execute: async (payload) => {
+      const write = await writeOrUnknownData(() => client.write<Rule>('POST', RULES_PATH, payload), 'outlook_list_rules');
       if (!write.ok) return write.result;
       const made = write.value;
-      if (!made?.Id) {
-        return minifiedResult({ created: true, ...unverified('outlook_list_rules') });
-      }
+      if (!made?.Id) return { created: true, ...unverified('outlook_list_rules') };
       const after = await readBack(() => client.get<Rule>(rulePath(made.Id as string)));
-      return minifiedResult(
-        after.ok
-          ? { created: true, ...stripOData(after.value) }
-          : { created: true, Id: made.Id, ...unverified('outlook_list_rules') },
-      );
+      return after.ok
+        ? { created: true, ...stripOData(after.value) }
+        : { created: true, Id: made.Id, ...unverified('outlook_list_rules') };
     },
-  );
+    render: minifiedResult,
+  }));
 
-  server.registerTool(
-    'outlook_update_rule',
-    {
-      description:
-        `Edit an inbox rule, or turn it on or off with \`enabled\`. Only what you pass changes; ${REPLACE_NOTE} Read-only rules are refused. The result is verified by re-reading the rule.` +
-        FORWARDING_RULE +
-        ' ' +
-        TIMEOUT_SENTENCE +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['edit rule', 'disable rule', 'enable rule'] }),
-      inputSchema: z.object({
-        id: z.string().min(1).describe('Rule Id from outlook_list_rules'),
-        name: z.string().min(1).optional().describe('New name'),
-        conditions: conditionFields.optional().describe('Replaces all conditions'),
-        exceptions: conditionFields.optional().describe('Replaces all exceptions'),
-        actions: actionFields.optional().describe('Replaces all actions'),
-        enabled: z.boolean().optional().describe('true runs the rule, false pauses it'),
-        sequence: z.number().int().min(1).optional().describe('Position among the rules (lower runs first)'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ id, name, conditions, exceptions, actions, enabled, sequence, confirmToken }, ctx) => {
+  registerGatedWrite(server, workMeta('change', { aliases: ['edit rule', 'disable rule', 'enable rule'] }), defineWrite({
+    name: 'outlook_update_rule',
+    description:
+      `Edit an inbox rule, or turn it on or off with \`enabled\`. Only what you pass changes; ${REPLACE_NOTE} Read-only rules are refused. The result is verified by re-reading the rule.` +
+      FORWARDING_RULE +
+      ' ' +
+      TIMEOUT_SENTENCE,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    inputSchema: z.object({
+      id: z.string().min(1).describe('Rule Id from outlook_list_rules'),
+      name: z.string().min(1).optional().describe('New name'),
+      conditions: conditionFields.optional().describe('Replaces all conditions'),
+      exceptions: conditionFields.optional().describe('Replaces all exceptions'),
+      actions: actionFields.optional().describe('Replaces all actions'),
+      enabled: z.boolean().optional().describe('true runs the rule, false pauses it'),
+      sequence: z.number().int().min(1).optional().describe('Position among the rules (lower runs first)'),
+    }),
+    plan: async ({ id, name, conditions, exceptions, actions, enabled, sequence }) => {
       if (conditions) requireSome('conditions', conditions);
       if (actions) requireSome('actions', actions);
       const payload = defined({
@@ -293,77 +307,77 @@ export function registerRuleTools(server: McpServer, client: OutlookClient): voi
       }
       const replaced = ['Conditions', 'Exceptions', 'Actions'].filter((k) => k in payload);
       const replaceNote = replaced.length ? ` This will replace all of its ${replaced.join(' and ')}.` : '';
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_update_rule',
-        action: 'mail.rule_update',
-        message: `Review and confirm this rule change:${replaceNote}${forwardingWarning(actions)}`,
-        summary: `Update inbox rule "${current.DisplayName ?? id}".${replaceNote}${forwardingWarning(actions)}`,
-        account: undefined,
-        target: id,
-        request: { method: 'PATCH', path, body: payload },
-        confirmToken,
-        preview: { current: stripOData(current) },
-      });
-      if (gate) return gate;
-      const write = await writeOrUnknown(() => client.write('PATCH', path, payload), 'outlook_list_rules');
+      return {
+        gate: {
+          action: 'mail.rule_update',
+          message: `Review and confirm this rule change:${replaceNote}${forwardingWarning(actions)}`,
+          summary: `Update inbox rule "${current.DisplayName ?? id}".${replaceNote}${forwardingWarning(actions)}`,
+          account: undefined,
+          target: id,
+          request: { method: 'PATCH', path, body: payload },
+          preview: { current: stripOData(current) },
+        },
+        state: { id, path, payload },
+      };
+    },
+    execute: async ({ id, path, payload }) => {
+      const write = await writeOrUnknownData(() => client.write('PATCH', path, payload), 'outlook_list_rules');
       if (!write.ok) return write.result;
       const read = await readBack(() => client.get<Rule>(path));
-      if (!read.ok) return minifiedResult({ updated: true, Id: id, ...unverified('outlook_list_rules') });
+      if (!read.ok) return { updated: true, Id: id, ...unverified('outlook_list_rules') };
       const after = read.value;
       const stale = (['DisplayName', 'Sequence', 'IsEnabled'] as const).filter(
         (k) => k in payload && after[k] !== payload[k],
       );
-      return minifiedResult({
+      return {
         updated: stale.length === 0,
         ...stripOData(after),
         ...(stale.length ? { warning: `Outlook accepted the write but ${stale.join(', ')} did not change.` } : {}),
-      });
+      };
     },
-  );
+    render: minifiedResult,
+  }));
 
-  server.registerTool(
-    'outlook_delete_rule',
-    {
-      description:
-        'Delete an inbox rule. To pause one instead, use outlook_update_rule with `enabled: false`. Messages it already handled stay where they are. The result is verified by re-reading the rule.' +
-        ' ' +
-        TIMEOUT_SENTENCE +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['remove rule'] }),
-      inputSchema: z.object({
-        id: z.string().min(1).describe('Rule Id from outlook_list_rules'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ id, confirmToken }, ctx) => {
+  registerGatedWrite(server, workMeta('change', { aliases: ['remove rule'] }), defineWrite({
+    name: 'outlook_delete_rule',
+    description:
+      'Delete an inbox rule. To pause one instead, use outlook_update_rule with `enabled: false`. Messages it already handled stay where they are. The result is verified by re-reading the rule.' +
+      ' ' +
+      TIMEOUT_SENTENCE,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    inputSchema: z.object({
+      id: z.string().min(1).describe('Rule Id from outlook_list_rules'),
+    }),
+    plan: async ({ id }) => {
       const path = rulePath(id);
       const current = await client.get<Rule>(path);
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_delete_rule',
-        action: 'mail.rule_delete',
-        message: 'Review and confirm deleting this rule:',
-        summary: `Delete inbox rule "${current.DisplayName ?? id}"`,
-        account: undefined,
-        target: id,
-        request: { method: 'DELETE', path },
-        confirmToken,
-        preview: { current: stripOData(current) },
-      });
-      if (gate) return gate;
-      const write = await writeOrUnknown(() => client.write('DELETE', path), 'outlook_list_rules');
+      return {
+        gate: {
+          action: 'mail.rule_delete',
+          message: 'Review and confirm deleting this rule:',
+          summary: `Delete inbox rule "${current.DisplayName ?? id}"`,
+          account: undefined,
+          target: id,
+          request: { method: 'DELETE', path },
+          preview: { current: stripOData(current) },
+        },
+        state: { id, path },
+      };
+    },
+    execute: async ({ id, path }) => {
+      const write = await writeOrUnknownData(() => client.write('DELETE', path), 'outlook_list_rules');
       if (!write.ok) return write.result;
       const read = await readBack(() => client.get<Rule>(path));
-      if (!read.ok && errorStatusOf(read.error) === 404) return minifiedResult({ deleted: true, Id: id });
-      if (!read.ok) return minifiedResult({ deleted: true, Id: id, ...unverified('outlook_list_rules') });
-      return minifiedResult({
+      if (!read.ok && errorStatusOf(read.error) === 404) return { deleted: true, Id: id };
+      if (!read.ok) return { deleted: true, Id: id, ...unverified('outlook_list_rules') };
+      return {
         deleted: false,
         Id: id,
         warning: 'Outlook accepted the delete but the rule is still there.',
-      });
+      };
     },
-  );
+    render: minifiedResult,
+  }));
 
   server.registerTool(
     'outlook_set_auto_reply',

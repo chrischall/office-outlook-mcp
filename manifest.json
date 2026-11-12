@@ -314,6 +314,14 @@
       "description": "Bulk-export calendar events in a date window (recurrences expanded, attachments optional) to JSONL or Markdown files; returns only a manifest"
     },
     {
+      "name": "outlook_batch",
+      "description": "Several mailbox writes (moves, read state, flags, rules, folders) under one preview and one approval, in order; no rollback (asks you to confirm first)"
+    },
+    {
+      "name": "outlook_confirm",
+      "description": "Confirm a previewed write with its confirmToken alone, without repeating the arguments"
+    },
+    {
       "name": "outlook_healthcheck",
       "description": "Report credential state and probe the API"
     }

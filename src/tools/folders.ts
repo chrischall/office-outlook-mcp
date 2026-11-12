@@ -4,6 +4,7 @@ import {
   CONFIRM_FLOW_SENTENCE,
   confirmTokenParam,
   confirmWrite,
+  defineWrite,
   errorStatusOf,
   McpToolError,
   minifiedResult,
@@ -13,7 +14,8 @@ import { compactFolder, type OutlookFolder } from '../view.js';
 import { workMeta } from './_hints.js';
 import { WELL_KNOWN } from './mail.js';
 import { folderId, readBack, unverified } from './rules.js';
-import { TIMEOUT_SENTENCE, writeOrUnknown } from './writes.js';
+import { TIMEOUT_SENTENCE, writeOrUnknown, writeOrUnknownData } from './writes.js';
+import { registerGatedWrite, registerUngatedWrite } from './_write.js';
 
 /** The mailbox's top level: the parent of Inbox, Archive and the folders beside them. */
 const ROOT = 'msgfolderroot';
@@ -133,14 +135,19 @@ async function rulesUsing(client: OutlookClient, ids: string[]): Promise<string[
 }
 
 export function registerFolderTools(server: McpServer, client: OutlookClient): void {
-  server.registerTool(
-    'outlook_create_folder',
+  registerUngatedWrite(
+    server,
     {
       description:
         'Create a mail folder: at the top level of the mailbox by default, or inside `parent`. Nothing reaches anyone else and an empty folder is easily deleted, so this does not ask for confirmation. Point rules or moves at the returned Id. ' +
         TIMEOUT_SENTENCE,
+      meta: workMeta('change', { aliases: ['new folder', 'add folder', 'make folder'] }),
+    },
+    {
+      name: 'outlook_create_folder',
+      // Not gated as a single tool; in outlook_batch the batch's approval covers it.
+      description: 'Create a mail folder.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['new folder', 'add folder', 'make folder'] }),
       inputSchema: z.object({
         name: z.string().min(1).describe('Folder name'),
         parent: z
@@ -149,51 +156,67 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
           .optional()
           .describe('Folder id or well-known name (e.g. "inbox") to create it inside. Omit for the top level.'),
       }),
-    },
-    async ({ name, parent }) => {
-      const path = `${folderPath(parent ?? ROOT)}/childfolders`;
-      let write;
-      try {
-        write = await writeOrUnknown(() => client.write<OutlookFolder>('POST', path, { DisplayName: name }), 'outlook_list_folders');
-      } catch (e) {
-        const status = errorStatusOf(e);
-        if (status === 409) {
-          throw new McpToolError(`A folder named "${name}" already exists there.`, {
-            hint: 'Use the existing one (see outlook_list_folders) or pick another name.',
-          });
+      plan: ({ name, parent }) => {
+        const path = `${folderPath(parent ?? ROOT)}/childfolders`;
+        const body = { DisplayName: name };
+        return {
+          gate: {
+            action: 'mail.folder_create',
+            summary: parent === undefined ? `Create folder "${name}" at the top level` : `Create folder "${name}" inside ${parent}`,
+            account: undefined,
+            request: { method: 'POST', path, body },
+          },
+          state: { name, parent, path, body },
+        };
+      },
+      execute: async ({ name, parent, path, body }) => {
+        let write;
+        try {
+          write = await writeOrUnknownData(() => client.write<OutlookFolder>('POST', path, body), 'outlook_list_folders');
+        } catch (e) {
+          const status = errorStatusOf(e);
+          if (status === 409) {
+            throw new McpToolError(`A folder named "${name}" already exists there.`, {
+              hint: 'Use the existing one (see outlook_list_folders) or pick another name.',
+            });
+          }
+          if (parent !== undefined && (status === 400 || status === 404)) {
+            throw new McpToolError(`No mail folder matches "${parent}".`, { hint: LIST_HINT });
+          }
+          throw e;
         }
-        if (parent !== undefined && (status === 400 || status === 404)) {
-          throw new McpToolError(`No mail folder matches "${parent}".`, { hint: LIST_HINT });
-        }
-        throw e;
-      }
-      if (!write.ok) return write.result;
-      return minifiedResult({ created: true, ...shown(write.value ?? { DisplayName: name }) });
+        if (!write.ok) return write.result;
+        return { created: true, ...shown(write.value ?? { DisplayName: name }) };
+      },
+      render: minifiedResult,
+      produces: {
+        // An "unknown" create returned no Id: the op that needs it fails rather than guessing.
+        id: (r: Record<string, unknown>) => {
+          if (typeof r.Id !== 'string' || !r.Id) {
+            throw new Error('outlook_create_folder did not return a folder Id (its outcome is unknown), so this op was not run.');
+          }
+          return r.Id;
+        },
+      },
     },
   );
 
-  server.registerTool(
-    'outlook_update_folder',
-    {
-      description:
-        'Rename a mail folder, move it under another folder, or both. Its mail and subfolders go with it, and rules that file into it keep working. Outlook\'s own folders (Inbox, Archive, …) are refused. The result is verified by re-reading the folder. ' +
-        TIMEOUT_SENTENCE +
-        ' ' +
-        CONFIRM_FLOW_SENTENCE,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      _meta: workMeta('change', { aliases: ['rename folder', 'move folder'] }),
-      inputSchema: z.object({
-        id: z.string().min(1).describe('Folder Id from outlook_list_folders'),
-        name: z.string().min(1).optional().describe('New name'),
-        parent: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Folder id or well-known name to move it into; "msgfolderroot" is the top level'),
-        confirmToken: confirmTokenParam,
-      }),
-    },
-    async ({ id, name, parent, confirmToken }, ctx) => {
+  registerGatedWrite(server, workMeta('change', { aliases: ['rename folder', 'move folder'] }), defineWrite({
+    name: 'outlook_update_folder',
+    description:
+      'Rename a mail folder, move it under another folder, or both. Its mail and subfolders go with it, and rules that file into it keep working. Outlook\'s own folders (Inbox, Archive, …) are refused. The result is verified by re-reading the folder. ' +
+      TIMEOUT_SENTENCE,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    inputSchema: z.object({
+      id: z.string().min(1).describe('Folder Id from outlook_list_folders'),
+      name: z.string().min(1).optional().describe('New name'),
+      parent: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Folder id or well-known name to move it into; "msgfolderroot" is the top level'),
+    }),
+    plan: async ({ id, name, parent }) => {
       if (name === undefined && parent === undefined) {
         throw new McpToolError('Nothing to change on this folder.', { hint: 'Pass `name`, `parent` or both.' });
       }
@@ -208,32 +231,33 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
         ...(name !== undefined ? [`rename it to "${name}"`] : []),
         ...(parent !== undefined ? [parent.toLowerCase() === ROOT ? 'move it to the top level' : `move it into ${parent}`] : []),
       ].join(' and ');
-      const gate = await confirmWrite(ctx, {
-        tool: 'outlook_update_folder',
-        action: 'mail.folder_update',
-        message: `Review and confirm: ${changes}.`,
-        summary: `Folder "${label}": ${changes}.`,
-        account: undefined,
-        target: id,
-        // A rename and a move are separate calls; preview both, as sent.
-        payload: [
-          ...(name !== undefined ? [{ method: 'PATCH', path: folderPath(id), body: { DisplayName: name } }] : []),
-          ...(destination !== undefined
-            ? [{ method: 'POST', path: `${folderPath(id)}/move`, body: { DestinationId: destination } }]
-            : []),
-        ],
-        confirmToken,
-        preview: { current: shown(current) },
-      });
-      if (gate) return gate;
-
+      return {
+        gate: {
+          action: 'mail.folder_update',
+          message: `Review and confirm: ${changes}.`,
+          summary: `Folder "${label}": ${changes}.`,
+          account: undefined,
+          target: id,
+          // A rename and a move are separate calls; preview both, as sent.
+          payload: [
+            ...(name !== undefined ? [{ method: 'PATCH', path: folderPath(id), body: { DisplayName: name } }] : []),
+            ...(destination !== undefined
+              ? [{ method: 'POST', path: `${folderPath(id)}/move`, body: { DestinationId: destination } }]
+              : []),
+          ],
+          preview: { current: shown(current) },
+        },
+        state: { id, name, destination },
+      };
+    },
+    execute: async ({ id, name, destination }) => {
       if (name !== undefined) {
-        const rename = await writeOrUnknown(() => client.write('PATCH', folderPath(id), { DisplayName: name }), 'outlook_list_folders');
+        const rename = await writeOrUnknownData(() => client.write('PATCH', folderPath(id), { DisplayName: name }), 'outlook_list_folders');
         if (!rename.ok) return rename.result;
       }
       let finalId = id;
       if (destination !== undefined) {
-        const move = await writeOrUnknown(
+        const move = await writeOrUnknownData(
           () => client.write<OutlookFolder>('POST', `${folderPath(id)}/move`, { DestinationId: destination }),
           'outlook_list_folders',
         );
@@ -242,19 +266,20 @@ export function registerFolderTools(server: McpServer, client: OutlookClient): v
       }
 
       const read = await readBack(() => client.get<OutlookFolder>(folderPath(finalId)));
-      if (!read.ok) return minifiedResult({ updated: true, Id: finalId, ...unverified('outlook_list_folders') });
+      if (!read.ok) return { updated: true, Id: finalId, ...unverified('outlook_list_folders') };
       const after = read.value;
       const stale = [
         ...(name !== undefined && after.DisplayName !== name ? ['name'] : []),
         ...(destination !== undefined && after.ParentFolderId !== destination ? ['location'] : []),
       ];
-      return minifiedResult({
+      return {
         updated: stale.length === 0,
         ...shown(after),
         ...(stale.length ? { warning: `Outlook accepted the write but the ${stale.join(' and ')} did not change.` } : {}),
-      });
+      };
     },
-  );
+    render: minifiedResult,
+  }));
 
   server.registerTool(
     'outlook_delete_folder',
