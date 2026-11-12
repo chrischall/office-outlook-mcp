@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
-import { ApiError } from '@chrischall/mcp-utils';
+import { ApiError, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { registerWriteTools } from '../src/tools/writes.js';
 import { registerRuleTools } from '../src/tools/rules.js';
@@ -19,7 +19,7 @@ type Obj = Record<string, unknown>;
 const RULES = '/me/MailFolders/inbox/MessageRules';
 const ALIASES: Record<string, string> = { msgfolderroot: 'root-id', inbox: 'inbox-id', archive: 'archive-id' };
 
-function stub(opts: { failRuleCreate?: boolean } = {}) {
+function stub(opts: { failRuleCreate?: boolean; folderCreateUnknown?: boolean } = {}) {
   const folders: Obj[] = [
     { Id: 'root-id', DisplayName: 'Top', ParentFolderId: 'store' },
     { Id: 'inbox-id', DisplayName: 'Inbox', ParentFolderId: 'root-id' },
@@ -52,6 +52,7 @@ function stub(opts: { failRuleCreate?: boolean } = {}) {
     calls.push({ method, path, body });
     const b = (body ?? {}) as Obj;
     if (method === 'POST' && path.endsWith('/childfolders')) {
+      if (opts.folderCreateUnknown) throw new WriteOutcomeUnknownError('Outlook', 'POST', { timeoutMs: 60_000 });
       const parent = folders.find((x) => x.Id === resolve(seg(path, 3)));
       if (!parent) throw new ApiError(404, 'Outlook 404: ErrorItemNotFound');
       const made = { Id: `folder-${++n}`, DisplayName: b.DisplayName, ParentFolderId: parent.Id };
@@ -177,6 +178,21 @@ describe('outlook_batch', () => {
     expect(out.note).toMatch(/No rollback/);
     // The folder was made, the rule was attempted, the move never sent.
     expect(s.writes().map((w) => w.path)).toEqual(['/me/mailfolders/msgfolderroot/childfolders', RULES]);
+    await h.close();
+  });
+
+  it('fails an op whose ref needs the id of a folder create that came back "unknown"', async () => {
+    const s = stub({ folderCreateUnknown: true });
+    const h = await harness(s.client);
+    const res = await confirmBatch(h, FOLDER_THEN_RULE);
+    expect(res.isError).toBe(true);
+    const out = parseToolResult<BatchResult>(res);
+    // The create is not a failure (it may have happened), but it produced no id to feed on.
+    expect(out.results[0]).toMatchObject({ tool: 'outlook_create_folder', applied: true, result: { status: 'unknown' } });
+    expect(out.results[1]).toMatchObject({ tool: 'outlook_create_rule', applied: false });
+    expect(out.results[1].error).toMatch(/did not return a folder Id/);
+    // The rule was never sent with a guessed folder.
+    expect(s.writes().map((w) => w.path)).toEqual(['/me/mailfolders/msgfolderroot/childfolders']);
     await h.close();
   });
 
