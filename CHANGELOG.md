@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.12.0...v0.13.0) (2026-11-12)
+
+
+### Features
+
+* **mail:** bulk-move messages by filter and batch writes under one confirmation ([#133](https://github.com/chrischall/office-outlook-mcp/issues/133)) ([54fcc41](https://github.com/chrischall/office-outlook-mcp/commit/54fcc41a3d2765adc33902be25b267b4aadc3d6d))
+* **mail:** read PDF, Excel and PowerPoint attachments as Markdown, CSV and images ([#135](https://github.com/chrischall/office-outlook-mcp/issues/135)) ([2a2044c](https://github.com/chrischall/office-outlook-mcp/commit/2a2044c32d5e3317401a93c246cf41dcf129a2b3))
+
 ## [0.12.0](https://github.com/chrischall/office-outlook-mcp/compare/v0.11.0...v0.12.0) (2026-11-11)
 
 
