@@ -466,10 +466,13 @@ including an `outlook_create_folder`, which on its own does not ask.
     and decks convert as `auto`).
   - `none`: no conversion — the file itself, as before.
 
-  The converted content sits inside the untrusted-content envelope (it is the
-  sender's text), followed by the metadata block with `converted: { format,
-  count, parts, notes }`. The original is still handed over as a link or saved
-  file, never inlined as well. Conversion reads files up to the 50 MB download
+  The converted content is the sender's text, so each Markdown or CSV part is
+  its own untrusted-content envelope (`{ untrusted_content, note, part,
+  mimeType, truncated?, text }`); images follow as image blocks. The metadata
+  block closes the result with `converted: { format, count, parts, notes }`.
+  The original is still handed over as a link or saved file, never inlined as
+  well; if that hand-over fails, the converted content is still returned with
+  `deliveryError`. Conversion reads files up to the 50 MB download
   cap (the 5 MB inline cap does not apply) and caps output at 200 KiB of text
   and 8 MiB of images. A corrupt file falls back to the plain answer with
   `conversion_error`. PDF page images need the native `@napi-rs/canvas`, which
@@ -494,8 +497,9 @@ delivered:
 
 A PDF, Excel or PowerPoint attachment is now also **converted** to Markdown,
 CSV or images (`convert`, default `auto`; `none` restores the old answer). The
-result then has several content blocks — the envelope, the converted content,
-and the metadata block last — rather than one. Such a file is downloaded to
+result then has several content blocks — a leading envelope, one envelope per
+converted text part (the text is in its `text` field), any images, and the
+metadata block last — rather than one. Such a file is downloaded to
 convert even where the original cannot be handed over.
 
 `outlook_move_messages` now names folders: the preview and result show

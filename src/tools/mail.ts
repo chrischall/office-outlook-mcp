@@ -17,7 +17,6 @@ import {
 import { blobStoreFromEnv, deliverFile, isHostedEnv, type BlobStore } from '@chrischall/mcp-utils/export';
 import {
   convertAttachment,
-  convertedToContent,
   detectConvertible,
   type ConvertibleFormat,
   type ConvertResult,
@@ -47,6 +46,7 @@ import {
   plainCollection,
   type FromPosition,
 } from './_paging.js';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 import { mailboxUntrusted, UNTRUSTED_DESCRIPTION_SUFFIX } from './_untrusted.js';
 import { readBody, readFormatParam, resolveFormat } from './_body.js';
 
@@ -228,7 +228,24 @@ const FORMAT_LABEL: Record<ConvertibleFormat, string> = { pdf: 'PDF', xlsx: 'Exc
 
 /** Leads a converted attachment's blocks, so the fence precedes every byte of third-party text. */
 const CONVERTED_FOLLOWS =
-  "The blocks after this one, up to the closing metadata block, are the attachment's content converted for reading (Markdown, CSV or images).";
+  "The blocks after this one, up to the closing metadata block, are the attachment's content converted for reading: each Markdown or CSV part in its own untrusted envelope (`part`, `text`), and images as image blocks.";
+
+/**
+ * The converted parts as content blocks. Every text part is wrapped in the
+ * untrusted envelope on its own, so the file's text is only ever a JSON string
+ * value: a PDF that writes a fake closing metadata block cannot speak from
+ * outside the envelope. Images carry no text and stay image blocks. The
+ * library's notes travel in the enveloped caption (`converted.notes`).
+ */
+function envelopedParts(converted: ConvertResult): CallToolResult['content'] {
+  return converted.parts.flatMap((p): CallToolResult['content'] =>
+    p.type === 'text'
+      ? mailboxUntrusted(
+          stripUndefined({ part: p.name, mimeType: p.mimeType, truncated: p.truncated || undefined, text: p.text }),
+        ).content
+      : [{ type: 'image', data: Buffer.from(p.data).toString('base64'), mimeType: p.mimeType }],
+  );
+}
 
 /** Decoded text is cut here; a longer file is marked `textTruncated`. */
 const MAX_TEXT_BYTES = 200 * 1024;
@@ -663,7 +680,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
     {
       description:
         "Get one attachment's content (ids from outlook_list_attachments). A text-like file (text/*, JSON, CSV, XML, .ics) up to 5 MB is decoded to `text`, capped at 200 KB (`textTruncated` marks a cut). An image up to 5 MB comes back as image content the model can see. Anything else (PDF, Office, archives) or larger, up to 50 MB, is handed over as the file itself: on a hosted server a signed, expiring download link (`downloadUrl`, valid until `downloadExpiresAt`) — give it to the user; on a local install a fresh file (`path`) under OUTLOOK_OUTPUT_DIR, else ~/Downloads/office-outlook-mcp. `via` says which (image, resource, link or disk). Where neither route exists the result is metadata only and `hint` says why. An attached Outlook item (a forwarded email or event) or a cloud-file link has no bytes to return; the result says which. " +
-        "A PDF, Excel workbook (.xlsx/.xlsm) or PowerPoint deck (.pptx) up to 50 MB is also converted so you can read it (`convert`, default \"auto\"): a PDF to Markdown (plus page images when it has little text, i.e. a scan), a workbook to one CSV per sheet, a deck to per-slide Markdown plus its embedded pictures. The converted content comes first, then the metadata block with `converted` (format, count, parts, notes); the original file is still handed over as a link or saved file as above, never inlined. If conversion fails the result is as without it, with `conversion_error` saying why." +
+        "A PDF, Excel workbook (.xlsx/.xlsm) or PowerPoint deck (.pptx) up to 50 MB is also converted so you can read it (`convert`, default \"auto\"): a PDF to Markdown (plus page images when it has little text, i.e. a scan), a workbook to one CSV per sheet, a deck to per-slide Markdown plus its embedded pictures. The converted content comes first (each text part in its own untrusted envelope, its text in `text`; images as image blocks), then the metadata block with `converted` (format, count, parts, notes); the original file is still handed over as a link or saved file as above, never inlined. If conversion fails the result is as without it, with `conversion_error` saying why." +
         ' ' + UNTRUSTED_DESCRIPTION_SUFFIX,
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: workMeta('lookup'),
@@ -711,10 +728,11 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
       }
       const image = isImage(contentType);
       const text = !image && isText(contentType, name);
-      const mode = convert ?? 'auto';
+      const requested = convert ?? 'auto';
+      const mode = requested === 'none' ? undefined : requested;
       // A PDF / workbook / deck is downloaded to convert even with nowhere to
       // hand the original over, and the 5 MB inline cap does not apply to it.
-      const format = mode === 'none' ? undefined : detectConvertible(name, contentType || undefined);
+      const format = mode === undefined ? undefined : detectConvertible(name, contentType || undefined);
       const size = meta.Size ?? 0;
       const routes = deliveryRoutes(env);
       const canHandOver = routes.store !== undefined || routes.diskDir !== undefined;
@@ -754,7 +772,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
       const buf = Buffer.from(bytes, 'base64');
       const fileName = name || 'attachment';
 
-      if (format) {
+      if (format && mode !== undefined) {
         let converted: ConvertResult | undefined;
         try {
           converted = await convertAttachment({
@@ -762,7 +780,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
             bytes: new Uint8Array(buf),
             fileName,
             ...(contentType ? { mimeType: contentType } : {}),
-            mode: mode === 'none' ? 'auto' : mode,
+            mode,
             limits: CONVERT_LIMITS,
             signal: currentCallSignal(),
           });
@@ -783,17 +801,25 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
           if (canHandOver) {
             // The original for the user to download: a link (hosted) or a saved
             // file (local) — never inlined beside the converted content.
-            const delivered = await deliverFile({
-              bytes: new Uint8Array(buf),
-              fileName,
-              ...(contentType ? { mimeType: contentType } : {}),
-              store: routes.store ?? null,
-              keyPrefix: 'attachments',
-              inlineMaxBytes: 0,
-              prefer: routes.store !== undefined ? 'link' : 'disk',
-              ...(routes.diskDir !== undefined ? { disk: { dir: routes.diskDir, mode: 0o600 } } : {}),
-            });
-            recordDelivery(out, delivered);
+            try {
+              const delivered = await deliverFile({
+                bytes: new Uint8Array(buf),
+                fileName,
+                ...(contentType ? { mimeType: contentType } : {}),
+                store: routes.store ?? null,
+                keyPrefix: 'attachments',
+                inlineMaxBytes: 0,
+                prefer: routes.store !== undefined ? 'link' : 'disk',
+                ...(routes.diskDir !== undefined ? { disk: { dir: routes.diskDir, mode: 0o600 } } : {}),
+              });
+              recordDelivery(out, delivered);
+            } catch (e) {
+              if (currentCallSignal()?.aborted) throw e;
+              // The converted content is already in hand: losing the original's
+              // hand-over is not worth losing what the user can read now.
+              out.deliveryError = e instanceof Error ? e.message : String(e);
+              out.hint = 'The original file could not be handed over (see deliveryError): only its converted content is returned. Open it in Outlook, or try again.';
+            }
           } else {
             out.hint = noRouteHint(routes, 'The original file is not attached: only its converted content is returned.');
           }
@@ -801,7 +827,7 @@ export function registerMailTools(server: McpServer, client: OutlookClient, opts
           // the blocks follow, and the enveloped metadata closes the result.
           const head = mailboxUntrusted({ name: meta.Name, convertedContent: CONVERTED_FOLLOWS });
           const caption = mailboxUntrusted(out);
-          return { content: [...head.content, ...convertedToContent(converted), ...caption.content] };
+          return { content: [...head.content, ...envelopedParts(converted), ...caption.content] };
         }
         if (!canHandOver) {
           out.hint = noRouteHint(routes, 'Binary content is not inlined: only images and text-like files are returned.');
